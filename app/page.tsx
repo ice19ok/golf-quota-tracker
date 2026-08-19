@@ -1,3 +1,4 @@
+import LogoutButton from "@/app/components/LogoutButton";
 import Link from "next/link";
 
 export default function HomePage() {
@@ -25,6 +26,7 @@ export default function HomePage() {
         >
           Players
         </Link>
+        <LogoutButton />
       </div>
     </main>
   );

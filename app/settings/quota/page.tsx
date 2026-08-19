@@ -1,28 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-
-type QuotaPoints = {
-  ace: number;
-  eagle: number;
-  birdie: number;
-  par: number;
-  bogey: number;
-  doubleBogey: number;
-};
-
-const defaultPoints: QuotaPoints = {
-  ace: 5,
-  eagle: 4,
-  birdie: 3,
-  par: 2,
-  bogey: 1,
-  doubleBogey: 0,
-};
+import {
+  DEFAULT_QUOTA_POINTS,
+  type QuotaPoints,
+} from "@/lib/quota";
 
 export default function QuotaSettingsPage() {
   const [points, setPoints] =
-    useState<QuotaPoints>(defaultPoints);
+    useState<QuotaPoints>(
+      DEFAULT_QUOTA_POINTS
+    );
 
   const [saved, setSaved] =
     useState(false);
@@ -33,9 +21,41 @@ export default function QuotaSettingsPage() {
 
     if (savedPoints) {
       try {
-        setPoints(
-          JSON.parse(savedPoints)
+        const parsed = JSON.parse(
+          savedPoints
         );
+
+        setPoints({
+          ace:
+            typeof parsed.ace === "number"
+              ? parsed.ace
+              : DEFAULT_QUOTA_POINTS.ace,
+
+          eagle:
+            typeof parsed.eagle === "number"
+              ? parsed.eagle
+              : DEFAULT_QUOTA_POINTS.eagle,
+
+          birdie:
+            typeof parsed.birdie === "number"
+              ? parsed.birdie
+              : DEFAULT_QUOTA_POINTS.birdie,
+
+          par:
+            typeof parsed.par === "number"
+              ? parsed.par
+              : DEFAULT_QUOTA_POINTS.par,
+
+          bogey:
+            typeof parsed.bogey === "number"
+              ? parsed.bogey
+              : DEFAULT_QUOTA_POINTS.bogey,
+
+          doubleBogey:
+            typeof parsed.doubleBogey === "number"
+              ? parsed.doubleBogey
+              : DEFAULT_QUOTA_POINTS.doubleBogey,
+        });
       } catch (error) {
         console.error(
           "Could not load quota points:",
@@ -67,11 +87,13 @@ export default function QuotaSettingsPage() {
   };
 
   const resetDefaults = () => {
-    setPoints(defaultPoints);
+    setPoints(DEFAULT_QUOTA_POINTS);
 
     localStorage.setItem(
       "quotaPoints",
-      JSON.stringify(defaultPoints)
+      JSON.stringify(
+        DEFAULT_QUOTA_POINTS
+      )
     );
 
     setSaved(true);
@@ -146,9 +168,14 @@ export default function QuotaSettingsPage() {
 
           </div>
 
+          <p className="mt-4 text-sm text-gray-500">
+            Triple Bogey or worse = 0 points
+          </p>
+
           <div className="mt-6 flex gap-3">
 
             <button
+              type="button"
               onClick={savePoints}
               className="rounded bg-blue-600 px-5 py-2 font-medium text-white hover:bg-blue-700"
             >
@@ -156,6 +183,7 @@ export default function QuotaSettingsPage() {
             </button>
 
             <button
+              type="button"
               onClick={resetDefaults}
               className="rounded bg-gray-600 px-5 py-2 font-medium text-white hover:bg-gray-700"
             >
@@ -195,6 +223,7 @@ function PointRow({
 
       <input
         type="number"
+        min="0"
         value={value}
         onChange={(e) =>
           onChange(e.target.value)

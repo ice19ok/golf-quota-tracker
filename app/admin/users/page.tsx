@@ -24,7 +24,8 @@ export default function AdminUsersPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [playerId, setPlayerId] = useState("");
-
+  const [role, setRole] = useState<"user" | "admin">("user");
+  
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [message, setMessage] = useState("");
@@ -120,12 +121,12 @@ export default function AdminUsersPage() {
       return;
     }
 
-    if (!playerId) {
-      setError(
-        "Select a player for this login."
-      );
-      return;
-    }
+    if (role === "user" && !playerId) {
+    setError(
+    "Select a player for this User account."
+    );
+    return;
+ }
 
     setCreating(true);
 
@@ -143,6 +144,7 @@ export default function AdminUsersPage() {
               email,
               password,
               playerId,
+              role,
             }),
           }
         );
@@ -166,6 +168,7 @@ export default function AdminUsersPage() {
       setEmail("");
       setPassword("");
       setPlayerId("");
+      setRole("user");
 
       await loadData();
     } catch (error) {
@@ -283,49 +286,73 @@ export default function AdminUsersPage() {
 
           </div>
 
-          <div className="mt-4">
+<div className="mt-4">
 
-            <label className="mb-2 block font-medium">
-              Attach to Player
-            </label>
+  <label className="mb-2 block font-medium">
+    Role
+  </label>
 
-            <select
-              value={playerId}
-              onChange={(e) =>
-                setPlayerId(e.target.value)
-              }
-              className="w-full rounded border px-3 py-2"
-            >
+  <select
+    value={role}
+    onChange={(e) =>
+      setRole(
+        e.target.value as
+          | "user"
+          | "admin"
+      )
+    }
+    className="w-full rounded border px-3 py-2"
+  >
+    <option value="user">
+      User — Can enter their own scores
+    </option>
 
-              <option value="">
-                Select a player
-              </option>
+    <option value="admin">
+      Admin — Full access
+    </option>
+  </select>
 
-              {players.map((player) => {
+</div>
+          {role === "user" && (
+  <div className="mt-4">
 
-                const hasLogin =
-                  playerHasLogin(
-                    player.id
-                  );
+    <label className="mb-2 block font-medium">
+      Attach to Player
+    </label>
 
-                return (
-                  <option
-                    key={player.id}
-                    value={player.id}
-                    disabled={hasLogin}
-                  >
-                    {player.name} — Quota{" "}
-                    {player.quota}
-                    {hasLogin
-                      ? " — Login already assigned"
-                      : ""}
-                  </option>
-                );
-              })}
+    <select
+      value={playerId}
+      onChange={(e) =>
+        setPlayerId(e.target.value)
+      }
+      className="w-full rounded border px-3 py-2"
+    >
+      <option value="">
+        Select a player
+      </option>
 
-            </select>
+      {players.map((player) => {
+        const hasLogin =
+          playerHasLogin(player.id);
 
-          </div>
+        return (
+          <option
+            key={player.id}
+            value={player.id}
+            disabled={hasLogin}
+          >
+            {player.name} — Quota{" "}
+            {player.quota}
+            {hasLogin
+              ? " — Login already assigned"
+              : ""}
+          </option>
+        );
+      })}
+    </select>
+
+  </div>
+)}
 
           <button
             onClick={createUser}

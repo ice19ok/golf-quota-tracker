@@ -52,11 +52,16 @@ export async function POST(request: Request) {
         ? body.playerId
         : "";
 
-    if (!email || !password || !playerId) {
+    const role =
+      body.role === "admin"
+        ? "admin"
+        : "user";
+
+    if (!email || !password) {
       return NextResponse.json(
         {
           error:
-            "Email, password, and player are required.",
+            "Email and password are required.",
         },
         { status: 400 }
       );
@@ -67,6 +72,17 @@ export async function POST(request: Request) {
         {
           error:
             "Password must be at least 6 characters.",
+        },
+        { status: 400 }
+      );
+    }
+
+    // User accounts must be attached to a player.
+    if (role === "user" && !playerId) {
+      return NextResponse.json(
+        {
+          error:
+            "A User account must be attached to a player.",
         },
         { status: 400 }
       );
@@ -97,36 +113,54 @@ export async function POST(request: Request) {
         }
       );
 
-    const { data: player, error: playerError } =
-      await adminSupabase
-        .from("players")
-        .select("id, name")
-        .eq("id", playerId)
-        .single();
+    let player = null;
 
-    if (playerError || !player) {
-      return NextResponse.json(
-        { error: "Selected player was not found." },
-        { status: 400 }
-      );
+    /*
+     * If this is a User account,
+     * verify the selected player.
+     */
+
+    if (role === "user") {
+      const { data: selectedPlayer, error: playerError } =
+        await adminSupabase
+          .from("players")
+          .select("id, name")
+          .eq("id", playerId)
+          .single();
+
+      if (playerError || !selectedPlayer) {
+        return NextResponse.json(
+          {
+            error:
+              "Selected player was not found.",
+          },
+          { status: 400 }
+        );
+      }
+
+      player = selectedPlayer;
+
+      const { data: existingProfile } =
+        await adminSupabase
+          .from("profiles")
+          .select("id")
+          .eq("player_id", playerId)
+          .maybeSingle();
+
+      if (existingProfile) {
+        return NextResponse.json(
+          {
+            error:
+              "This player already has a login.",
+          },
+          { status: 409 }
+        );
+      }
     }
 
-    const { data: existingProfile } =
-      await adminSupabase
-        .from("profiles")
-        .select("id")
-        .eq("player_id", playerId)
-        .maybeSingle();
-
-    if (existingProfile) {
-      return NextResponse.json(
-        {
-          error:
-            "This player already has a login.",
-        },
-        { status: 409 }
-      );
-    }
+    /*
+     * Create the Supabase Auth account.
+     */
 
     const {
       data: authData,
@@ -149,13 +183,20 @@ export async function POST(request: Request) {
       );
     }
 
+    /*
+     * Create the profile.
+     */
+
     const { error: insertProfileError } =
       await adminSupabase
         .from("profiles")
         .insert({
           id: authData.user.id,
-          role: "user",
-          player_id: playerId,
+          role,
+          player_id:
+            role === "user"
+              ? playerId
+              : null,
         });
 
     if (insertProfileError) {
@@ -166,7 +207,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error:
-            "User was created but could not be attached to the player.",
+            "User was created but the profile could not be created.",
         },
         { status: 500 }
       );
@@ -174,14 +215,14 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
+
       user: {
         id: authData.user.id,
         email: authData.user.email,
+        role,
       },
-      player: {
-        id: player.id,
-        name: player.name,
-      },
+
+      player,
     });
   } catch (error) {
     console.error(

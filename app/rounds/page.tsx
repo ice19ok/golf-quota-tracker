@@ -1,11 +1,17 @@
 "use client";
 
-import { getGolfCourse } from "../../lib/courses";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
+import {
+  DEFAULT_QUOTA_POINTS,
+  loadQuotaPoints,
+  calculatePlayerQuotaPoints,
+  type QuotaPoints,
+} from "@/lib/quota";
 
 type Player = {
-  id: number;
+  id: string;
   name: string;
   quota: number;
 };
@@ -15,7 +21,7 @@ type Round = {
   name: string;
   course: string;
   holes: number;
-  playerIds: number[];
+  playerIds: string[];
   pars?: number[];
 };
 
@@ -26,86 +32,243 @@ type Scorecard = {
   savedAt: string;
 };
 
+const KICKINGBIRD_WHITE_PARS = [
+  4, 4, 3, 5, 4, 3, 4, 4, 4,
+  4, 3, 5, 4, 3, 5, 3, 4, 4,
+];
+
+const EDMOND_WHITE_PARS = [
+  4, 5, 3, 4, 4, 4, 3, 4, 4,
+  3, 4, 4, 4, 3, 5, 4, 3, 5,
+];
+
 export default function RoundsPage() {
-  const [rounds, setRounds] = useState<Round[]>([]);
-  const [players, setPlayers] = useState<Player[]>([]);
-  const [scorecards, setScorecards] = useState<Scorecard[]>([]);
-  const [loading, setLoading] = useState(true);
+  const supabase = createClient();
+
+  const [rounds, setRounds] =
+    useState<Round[]>([]);
+
+  const [players, setPlayers] =
+    useState<Player[]>([]);
+
+  const [scorecards, setScorecards] =
+    useState<Scorecard[]>([]);
+
+  const [quotaPoints, setQuotaPoints] =
+    useState<QuotaPoints>(
+      DEFAULT_QUOTA_POINTS
+    );
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [error, setError] =
+    useState("");
 
   useEffect(() => {
     loadData();
   }, []);
 
-  function loadData() {
-    const savedRounds =
-      localStorage.getItem("rounds");
+  async function loadData() {
+    setLoading(true);
+    setError("");
 
-    const savedPlayers =
-      localStorage.getItem("players");
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-    const savedScorecards =
-      localStorage.getItem("scorecards");
-
-    if (savedRounds) {
-      try {
-        setRounds(JSON.parse(savedRounds));
-      } catch (error) {
-        console.error(
-          "Could not load rounds:",
-          error
-        );
+      if (!user) {
+        window.location.href = "/login";
+        return;
       }
-    }
 
-    if (savedPlayers) {
-      try {
-        setPlayers(JSON.parse(savedPlayers));
-      } catch (error) {
+      /*
+       * LOAD PLAYERS
+       */
+      const {
+        data: playerData,
+        error: playerError,
+      } = await supabase
+        .from("players")
+        .select("id, name, quota")
+        .order("name");
+
+      if (playerError) {
         console.error(
           "Could not load players:",
-          error
+          playerError
+        );
+
+        setError(playerError.message);
+      } else {
+        setPlayers(
+          (playerData || []).map(
+            (player) => ({
+              id: String(player.id),
+              name: player.name,
+              quota: Number(
+                player.quota
+              ),
+            })
+          )
         );
       }
-    }
 
-    if (savedScorecards) {
-      try {
-        setScorecards(
-          JSON.parse(savedScorecards)
+      /*
+       * LOAD QUOTA SETTINGS
+       *
+       * This comes from the shared
+       * quota loader.
+       */
+      const settings = loadQuotaPoints();
+
+      setQuotaPoints(settings);
+
+      /*
+       * LOAD ROUNDS
+       */
+      const savedRounds =
+        localStorage.getItem(
+          "rounds"
         );
-      } catch (error) {
-        console.error(
-          "Could not load scorecards:",
-          error
-        );
+
+      if (savedRounds) {
+        try {
+          const parsedRounds =
+            JSON.parse(savedRounds);
+
+          if (
+            Array.isArray(
+              parsedRounds
+            )
+          ) {
+            const cleanedRounds =
+              parsedRounds.map(
+                (round: any) => ({
+                  id: Number(
+                    round.id
+                  ),
+
+                  name: String(
+                    round.name || ""
+                  ),
+
+                  course: String(
+                    round.course || ""
+                  ),
+
+                  holes: Number(
+                    round.holes || 18
+                  ),
+
+                  playerIds:
+                    Array.isArray(
+                      round.playerIds
+                    )
+                      ? round.playerIds.map(
+                          (id: any) =>
+                            String(id)
+                        )
+                      : [],
+
+                  pars:
+                    Array.isArray(
+                      round.pars
+                    )
+                      ? round.pars.map(
+                          (par: any) =>
+                            Number(par)
+                        )
+                      : undefined,
+                })
+              );
+
+            setRounds(
+              cleanedRounds
+            );
+          }
+        } catch (error) {
+          console.error(
+            "Could not load rounds:",
+            error
+          );
+
+          setError(
+            "Could not load saved rounds."
+          );
+        }
       }
-    }
 
-    setLoading(false);
+      /*
+       * LOAD SCORECARDS
+       */
+      const savedScorecards =
+        localStorage.getItem(
+          "scorecards"
+        );
+
+      if (savedScorecards) {
+        try {
+          const parsedScorecards =
+            JSON.parse(
+              savedScorecards
+            );
+
+          if (
+            Array.isArray(
+              parsedScorecards
+            )
+          ) {
+            setScorecards(
+              parsedScorecards
+            );
+          }
+        } catch (error) {
+          console.error(
+            "Could not load scorecards:",
+            error
+          );
+        }
+      }
+    } catch (error) {
+      console.error(
+        "Could not load page:",
+        error
+      );
+
+      setError(
+        "Could not load your golf rounds."
+      );
+    } finally {
+      setLoading(false);
+    }
   }
 
-  function getParsForRound(round: Round) {
-    // New rounds already have their pars saved.
+  /*
+   * GET COURSE PARS
+   */
+  function getParsForRound(
+    round: Round
+  ): number[] {
     if (
       round.pars &&
-      round.pars.length > 0
+      round.pars.length >=
+        round.holes
     ) {
-      return round.pars;
+      return round.pars.slice(
+        0,
+        round.holes
+      );
     }
 
-    // Fallback for older rounds.
     if (
       round.course ===
       "KickingBird Golf Club"
     ) {
-      const course =
-        getGolfCourse(round.course);
-
-      return (
-        course?.pars.slice(
-          0,
-          round.holes
-        ) || []
+      return KICKINGBIRD_WHITE_PARS.slice(
+        0,
+        round.holes
       );
     }
 
@@ -113,16 +276,9 @@ export default function RoundsPage() {
       round.course ===
       "The Golf Club of Edmond"
     ) {
-      const course =
-        getGolfCourse(
-          "golf-club-edmond"
-        );
-
-      return (
-        course?.pars.slice(
-          0,
-          round.holes
-        ) || []
+      return EDMOND_WHITE_PARS.slice(
+        0,
+        round.holes
       );
     }
 
@@ -131,72 +287,58 @@ export default function RoundsPage() {
     ).fill(4);
   }
 
+  /*
+   * GET PLAYER POINTS
+   *
+   * Uses the SAME shared scoring
+   * function as the scorecard page.
+   */
   function getPlayerPoints(
-    playerId: number,
+    playerId: string,
     round: Round
   ) {
     const scorecard =
       scorecards.find(
         (card) =>
-          card.roundId ===
-          round.id
+          String(
+            card.roundId
+          ) ===
+          String(round.id)
       );
 
-    if (!scorecard) return 0;
+    if (!scorecard) {
+      return 0;
+    }
 
     const coursePars =
       getParsForRound(round);
 
-    let points = 0;
+    const pars: Record<
+      number,
+      number
+    > = {};
 
     for (
       let hole = 1;
       hole <= round.holes;
       hole++
     ) {
-      const key =
-        `${playerId}-${hole}`;
-
-      const score =
-        scorecard.scores[key];
-
-      const par =
-        coursePars[hole - 1] ||
-        scorecard.pars[hole] ||
-        4;
-
-      if (
-        score === "" ||
-        score === undefined
-      ) {
-        continue;
-      }
-
-      const difference =
-        Number(score) - par;
-
-      if (difference >= 2) {
-        points += 0;
-      } else if (
-        difference === 1
-      ) {
-        points += 1;
-      } else if (
-        difference === 0
-      ) {
-        points += 2;
-      } else if (
-        difference === -1
-      ) {
-        points += 3;
-      } else {
-        points += 4;
-      }
+      pars[hole] =
+        coursePars[hole - 1] ?? 4;
     }
 
-    return points;
+    return calculatePlayerQuotaPoints(
+      scorecard.scores || {},
+      playerId,
+      pars,
+      round.holes,
+      quotaPoints
+    );
   }
 
+  /*
+   * DELETE ROUND
+   */
   function deleteRound(
     roundId: number
   ) {
@@ -205,7 +347,9 @@ export default function RoundsPage() {
         "Are you sure you want to delete this round?"
       );
 
-    if (!confirmed) return;
+    if (!confirmed) {
+      return;
+    }
 
     const updatedRounds =
       rounds.filter(
@@ -216,10 +360,16 @@ export default function RoundsPage() {
     const updatedScorecards =
       scorecards.filter(
         (card) =>
-          card.roundId !== roundId
+          String(
+            card.roundId
+          ) !==
+          String(roundId)
       );
 
-    setRounds(updatedRounds);
+    setRounds(
+      updatedRounds
+    );
+
     setScorecards(
       updatedScorecards
     );
@@ -242,88 +392,158 @@ export default function RoundsPage() {
   if (loading) {
     return (
       <main className="p-8">
-        <p>Loading rounds...</p>
+        <p>
+          Loading rounds...
+        </p>
       </main>
     );
   }
 
   return (
-    <main className="p-8 max-w-6xl mx-auto">
+    <main className="mx-auto max-w-6xl p-8">
 
-      {/* Header */}
+      {/* HEADER */}
 
-      <div className="flex justify-between items-center mb-8">
+      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 
         <div>
           <h1 className="text-3xl font-bold">
             Golf Rounds
           </h1>
 
-          <p className="text-gray-600 mt-1">
+          <p className="mt-1 text-gray-600">
             View and manage your rounds
           </p>
         </div>
 
         <Link
           href="/rounds/new"
-          className="bg-green-600 text-white px-5 py-3 rounded font-semibold"
+          className="rounded bg-green-600 px-5 py-3 text-center font-semibold text-white hover:bg-green-700"
         >
           + New Round
         </Link>
 
       </div>
 
-      {/* Navigation */}
+      {/* ERROR */}
 
-      <div className="flex gap-3 mb-8">
+      {error && (
+        <div className="mb-6 rounded border border-red-300 bg-red-50 p-4 text-red-700">
+          {error}
+        </div>
+      )}
+
+      {/* CURRENT SCORING */}
+
+      <div className="mb-8 rounded-lg border bg-gray-50 p-4">
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+
+          <div>
+            <h2 className="font-bold">
+              Current Quota Scoring
+            </h2>
+
+            <p className="text-sm text-gray-600">
+              Loaded directly from Quota Settings.
+            </p>
+          </div>
+
+          <Link
+            href="/settings/quota"
+            className="rounded bg-purple-600 px-4 py-2 text-center text-white hover:bg-purple-700"
+          >
+            Edit Quota Settings
+          </Link>
+
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-6">
+
+          {[
+            ["Ace", quotaPoints.ace],
+            ["Eagle", quotaPoints.eagle],
+            ["Birdie", quotaPoints.birdie],
+            ["Par", quotaPoints.par],
+            ["Bogey", quotaPoints.bogey],
+            [
+              "Double Bogey",
+              quotaPoints.doubleBogey,
+            ],
+          ].map(
+            ([label, value]) => (
+              <div
+                key={String(label)}
+                className="rounded border bg-white p-3 text-center"
+              >
+                <div className="text-xs text-gray-500">
+                  {label}
+                </div>
+
+                <div className="text-xl font-bold">
+                  {value}
+                </div>
+              </div>
+            )
+          )}
+
+        </div>
+
+        <p className="mt-3 text-xs text-gray-500">
+          Triple Bogey or worse = 0 points
+        </p>
+
+      </div>
+
+      {/* NAVIGATION */}
+
+      <div className="mb-8 flex flex-wrap gap-3">
 
         <Link
           href="/"
-          className="bg-gray-500 text-white px-4 py-2 rounded"
+          className="rounded bg-gray-500 px-4 py-2 text-white hover:bg-gray-600"
         >
           Home
         </Link>
 
         <Link
           href="/players"
-          className="bg-blue-600 text-white px-4 py-2 rounded"
+          className="rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
         >
           Players
         </Link>
 
         <Link
           href="/settings/quota"
-          className="bg-purple-600 text-white px-4 py-2 rounded"
+          className="rounded bg-purple-600 px-4 py-2 text-white hover:bg-purple-700"
         >
           Quota Settings
         </Link>
 
       </div>
 
-      {/* No rounds */}
+      {/* NO ROUNDS */}
 
       {rounds.length === 0 && (
-        <div className="border rounded p-8 text-center">
+        <div className="rounded-lg border bg-white p-8 text-center">
 
-          <h2 className="text-xl font-bold mb-2">
+          <h2 className="mb-2 text-xl font-bold">
             No rounds yet
           </h2>
 
-          <p className="text-gray-600 mb-5">
-            Create your first golf round.
+          <p className="text-gray-600">
+            Click{" "}
+            <strong>
+              + New Round
+            </strong>{" "}
+            above to create your first
+            golf round.
           </p>
-
-          <Link
-            href="/rounds/new"
-            className="bg-green-600 text-white px-5 py-3 rounded"
-          >
-            Create Round
-          </Link>
 
         </div>
       )}
 
-      {/* Rounds */}
+      {/* ROUNDS */}
 
       <div className="space-y-6">
 
@@ -336,19 +556,62 @@ export default function RoundsPage() {
               players.filter(
                 (player) =>
                   round.playerIds.includes(
-                    player.id
+                    String(
+                      player.id
+                    )
                   )
               );
+
+            const coursePars =
+              getParsForRound(
+                round
+              );
+
+            const totalPar =
+              coursePars.reduce(
+                (
+                  total,
+                  par
+                ) =>
+                  total + par,
+                0
+              );
+
+            const leaderboard =
+              roundPlayers
+                .map((player) => {
+
+                  const points =
+                    getPlayerPoints(
+                      player.id,
+                      round
+                    );
+
+                  const result =
+                    points -
+                    player.quota;
+
+                  return {
+                    player,
+                    points,
+                    result,
+                  };
+                })
+                .sort(
+                  (a, b) =>
+                    b.result -
+                    a.result
+                );
 
             return (
               <div
                 key={round.id}
-                className="border rounded-lg p-6"
+                className="rounded-lg border bg-white p-6 shadow-sm"
               >
 
-                {/* Round Header */}
+                {/* ROUND HEADER */}
 
-                <div className="flex justify-between items-start">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
 
                   <div>
 
@@ -356,7 +619,7 @@ export default function RoundsPage() {
                       {round.name}
                     </h2>
 
-                    <p className="text-gray-600 mt-1">
+                    <p className="mt-1 text-gray-600">
                       {round.course}
                       {" • "}
                       White Tees
@@ -364,52 +627,81 @@ export default function RoundsPage() {
                       {round.holes} holes
                     </p>
 
+                    <p className="mt-1 text-sm text-gray-500">
+                      Course Par:{" "}
+                      <strong>
+                        {totalPar}
+                      </strong>
+                    </p>
+
                   </div>
 
                   <Link
                     href={`/rounds/${round.id}`}
-                    className="bg-blue-600 text-white px-4 py-2 rounded"
+                    className="rounded bg-blue-600 px-4 py-2 text-center text-white hover:bg-blue-700"
                   >
                     Open Round
                   </Link>
 
                 </div>
 
-                {/* Leaderboard */}
+                {/* PLAYERS */}
 
                 <div className="mt-6">
 
-                  <h3 className="font-bold mb-3">
-                    Leaderboard
+                  <h3 className="mb-3 font-bold">
+                    Players
                   </h3>
 
-                  <div className="space-y-2">
+                  {roundPlayers.length ===
+                  0 ? (
+                    <p className="text-sm text-red-600">
+                      No players found for
+                      this round.
+                    </p>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
 
-                    {roundPlayers
-                      .map((player) => {
+                      {roundPlayers.map(
+                        (player) => (
+                          <div
+                            key={
+                              player.id
+                            }
+                            className="rounded bg-gray-100 px-3 py-2"
+                          >
 
-                        const points =
-                          getPlayerPoints(
-                            player.id,
-                            round
-                          );
+                            <span className="font-medium">
+                              {player.name}
+                            </span>
 
-                        const result =
-                          points -
-                          player.quota;
+                            <span className="ml-2 text-sm text-gray-500">
+                              Quota{" "}
+                              {player.quota}
+                            </span>
 
-                        return {
-                          player,
-                          points,
-                          result,
-                        };
-                      })
-                      .sort(
-                        (a, b) =>
-                          b.result -
-                          a.result
-                      )
-                      .map(
+                          </div>
+                        )
+                      )}
+
+                    </div>
+                  )}
+
+                </div>
+
+                {/* LEADERBOARD */}
+
+                {roundPlayers.length >
+                  0 && (
+                  <div className="mt-6">
+
+                    <h3 className="mb-3 font-bold">
+                      Leaderboard
+                    </h3>
+
+                    <div className="space-y-2">
+
+                      {leaderboard.map(
                         (
                           entry,
                           index
@@ -417,15 +709,18 @@ export default function RoundsPage() {
 
                           <div
                             key={
-                              entry.player.id
+                              entry
+                                .player
+                                .id
                             }
-                            className="flex items-center justify-between border rounded p-3"
+                            className="flex items-center justify-between rounded border p-3"
                           >
 
                             <div className="flex items-center gap-3">
 
-                              <div className="font-bold w-6">
-                                {index + 1}
+                              <div className="w-6 font-bold">
+                                {index +
+                                  1}
                               </div>
 
                               <div>
@@ -464,13 +759,14 @@ export default function RoundsPage() {
                                   : entry.result <
                                     0
                                   ? "text-red-600"
-                                  : ""
+                                  : "text-gray-600"
                               }`}
                             >
                               {entry.result >
                               0
                                 ? "+"
                                 : ""}
+
                               {
                                 entry.result
                               }
@@ -481,28 +777,30 @@ export default function RoundsPage() {
                         )
                       )}
 
+                    </div>
+
                   </div>
+                )}
 
-                </div>
+                {/* ACTIONS */}
 
-                {/* Actions */}
-
-                <div className="mt-5 flex gap-3">
+                <div className="mt-6 flex flex-wrap gap-3">
 
                   <Link
                     href={`/rounds/${round.id}`}
-                    className="bg-gray-800 text-white px-4 py-2 rounded"
+                    className="rounded bg-gray-800 px-4 py-2 text-white hover:bg-gray-900"
                   >
                     Scorecard
                   </Link>
 
                   <button
+                    type="button"
                     onClick={() =>
                       deleteRound(
                         round.id
                       )
                     }
-                    className="bg-red-600 text-white px-4 py-2 rounded"
+                    className="rounded bg-red-600 px-4 py-2 text-white hover:bg-red-700"
                   >
                     Delete Round
                   </button>

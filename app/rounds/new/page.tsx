@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 
 type Player = {
-  id: number;
+  id: string;
   name: string;
   quota: number;
 };
@@ -15,91 +16,145 @@ type Round = {
   name: string;
   course: string;
   holes: number;
-  playerIds: number[];
+  playerIds: string[];
   pars: number[];
 };
 
-const COURSES = {
+const COURSES: Record<string, number[]> = {
   "KickingBird Golf Club": [
-    4, 4, 3, 5, 4, 3, 4, 4, 5,
+    4, 4, 3, 5, 4, 3, 4, 4, 4,
     4, 3, 5, 4, 3, 5, 3, 4, 4,
   ],
 
   "The Golf Club of Edmond": [
     4, 5, 3, 4, 4, 4, 3, 4, 5,
-    3, 4, 4, 4, 3, 4, 4, 3, 5,
+    3, 4, 4, 4, 3, 5, 4, 3, 5,
   ],
 };
 
+const COURSE_NAMES = Object.keys(COURSES);
+
 export default function NewRoundPage() {
   const router = useRouter();
+  const supabase = createClient();
 
   const [players, setPlayers] =
     useState<Player[]>([]);
 
   const [selectedPlayers, setSelectedPlayers] =
-    useState<number[]>([]);
+    useState<string[]>([]);
 
   const [roundName, setRoundName] =
     useState("");
 
   const [course, setCourse] =
-    useState(
-      "KickingBird Golf Club"
-    );
+    useState("KickingBird Golf Club");
 
   const [holes, setHoles] =
     useState("18");
 
-  useEffect(() => {
-    const savedPlayers =
-      localStorage.getItem(
-        "players"
-      );
+  const [loadingPlayers, setLoadingPlayers] =
+    useState(true);
 
-    if (savedPlayers) {
-      try {
-        setPlayers(
-          JSON.parse(
-            savedPlayers
-          )
-        );
-      } catch (error) {
+  const [saving, setSaving] =
+    useState(false);
+
+  const [error, setError] =
+    useState("");
+
+  /*
+   * LOAD PLAYERS FROM SUPABASE
+   */
+  useEffect(() => {
+    async function loadPlayers() {
+      setLoadingPlayers(true);
+      setError("");
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        window.location.href = "/login";
+        return;
+      }
+
+      const {
+        data,
+        error,
+      } = await supabase
+        .from("players")
+        .select("id, name, quota")
+        .order("name");
+
+      if (error) {
         console.error(
           "Could not load players:",
           error
         );
+
+        setError(error.message);
+        setPlayers([]);
+        setLoadingPlayers(false);
+        return;
       }
+
+      setPlayers(data || []);
+      setLoadingPlayers(false);
     }
+
+    loadPlayers();
   }, []);
 
+  /*
+   * SELECT / DESELECT PLAYER
+   */
   function togglePlayer(
-    playerId: number
+    playerId: string
   ) {
     setSelectedPlayers(
-      (currentPlayers) => {
-
+      (current) => {
         if (
-          currentPlayers.includes(
+          current.includes(
             playerId
           )
         ) {
-          return currentPlayers.filter(
+          return current.filter(
             (id) =>
               id !== playerId
           );
         }
 
         return [
-          ...currentPlayers,
+          ...current,
           playerId,
         ];
       }
     );
   }
 
-  function createRound() {
+  /*
+   * SELECT ALL
+   */
+  function selectAllPlayers() {
+    setSelectedPlayers(
+      players.map(
+        (player) => player.id
+      )
+    );
+  }
 
+  /*
+   * CLEAR ALL
+   */
+  function clearAllPlayers() {
+    setSelectedPlayers([]);
+  }
+
+  /*
+   * CREATE ROUND
+   */
+  function createRound() {
     if (!roundName.trim()) {
       alert(
         "Please enter a round name."
@@ -116,66 +171,77 @@ export default function NewRoundPage() {
       return;
     }
 
-    /*
-     * Get the correct pars for the
-     * selected course.
-     */
-
     const coursePars =
-      COURSES[
-        course as keyof typeof COURSES
-      ];
+      COURSES[course];
 
-    /*
-     * Only use the number of holes
-     * selected.
-     */
+    if (!coursePars) {
+      alert(
+        "Could not find the par information for this course."
+      );
+      return;
+    }
+
+    const numberOfHoles =
+      Number(holes);
 
     const selectedPars =
       coursePars.slice(
         0,
-        Number(holes)
+        numberOfHoles
       );
 
     const newRound: Round = {
       id: Date.now(),
-      name: roundName.trim(),
+
+      name:
+        roundName.trim(),
+
       course,
-      holes: Number(holes),
+
+      holes:
+        numberOfHoles,
+
       playerIds:
         selectedPlayers,
 
-      /*
-       * THIS IS THE IMPORTANT PART.
-       *
-       * The round now permanently
-       * stores the hole-by-hole pars.
-       */
-
-      pars: selectedPars,
+      pars:
+        selectedPars,
     };
 
-    const savedRounds =
-      localStorage.getItem(
-        "rounds"
-      );
-
+    /*
+     * LOAD EXISTING ROUNDS
+     */
     let rounds: Round[] = [];
 
-    if (savedRounds) {
-      try {
-        rounds =
+    try {
+      const savedRounds =
+        localStorage.getItem(
+          "rounds"
+        );
+
+      if (savedRounds) {
+        const parsed =
           JSON.parse(
             savedRounds
           );
-      } catch (error) {
-        console.error(
-          "Could not load rounds:",
-          error
-        );
+
+        if (
+          Array.isArray(parsed)
+        ) {
+          rounds =
+            parsed;
+        }
       }
+    } catch (error) {
+      console.error(
+        "Could not load rounds:",
+        error
+      );
     }
 
+    /*
+     * SAVE ROUND
+     */
     rounds.push(
       newRound
     );
@@ -188,65 +254,65 @@ export default function NewRoundPage() {
     );
 
     /*
-     * IMPORTANT:
-     *
      * Remove any old scorecard
-     * accidentally associated with
-     * this round ID.
-     *
-     * Normally there won't be one,
-     * but this keeps things clean.
+     * with this round ID.
      */
+    try {
+      const savedScorecards =
+        localStorage.getItem(
+          "scorecards"
+        );
 
-    const savedScorecards =
-      localStorage.getItem(
-        "scorecards"
-      );
-
-    if (savedScorecards) {
-      try {
-
+      if (savedScorecards) {
         const scorecards =
           JSON.parse(
             savedScorecards
           );
 
-        const cleaned =
-          scorecards.filter(
-            (card: any) =>
-              card.roundId !==
-              newRound.id
-          );
-
-        localStorage.setItem(
-          "scorecards",
-          JSON.stringify(
-            cleaned
+        if (
+          Array.isArray(
+            scorecards
           )
-        );
+        ) {
+          const cleaned =
+            scorecards.filter(
+              (card: any) =>
+                String(
+                  card.roundId
+                ) !==
+                String(
+                  newRound.id
+                )
+            );
 
-      } catch (error) {
-        console.error(
-          "Could not clean scorecards:",
-          error
-        );
+          localStorage.setItem(
+            "scorecards",
+            JSON.stringify(
+              cleaned
+            )
+          );
+        }
       }
+    } catch (error) {
+      console.error(
+        "Could not clean scorecards:",
+        error
+      );
     }
 
+    /*
+     * GO DIRECTLY TO SCORECARD
+     */
     router.push(
       `/rounds/${newRound.id}`
     );
   }
 
   /*
-   * Display the pars for the
-   * selected course.
+   * COURSE PAR PREVIEW
    */
-
   const selectedCoursePars =
-    COURSES[
-      course as keyof typeof COURSES
-    ];
+    COURSES[course] || [];
 
   const selectedHoles =
     selectedCoursePars.slice(
@@ -261,52 +327,86 @@ export default function NewRoundPage() {
       0
     );
 
+  /*
+   * LOADING
+   */
+  if (loadingPlayers) {
+    return (
+      <main className="mx-auto max-w-4xl p-8">
+
+        <h1 className="text-3xl font-bold">
+          Create New Round
+        </h1>
+
+        <p className="mt-4 text-gray-600">
+          Loading players...
+        </p>
+
+      </main>
+    );
+  }
+
   return (
-    <main className="p-8 max-w-4xl mx-auto">
+    <main className="mx-auto max-w-4xl p-8">
 
-      {/* Navigation */}
+      {/* NAVIGATION */}
 
-      <div className="flex gap-4 mb-6">
+      <div className="mb-6 flex flex-wrap gap-3">
 
         <Link
           href="/"
-          className="bg-gray-500 text-white px-4 py-2 rounded"
+          className="rounded bg-gray-500 px-4 py-2 text-white"
         >
           Home
         </Link>
 
         <Link
           href="/rounds"
-          className="bg-blue-600 text-white px-4 py-2 rounded"
+          className="rounded bg-blue-600 px-4 py-2 text-white"
         >
           Rounds
         </Link>
 
         <Link
           href="/players"
-          className="bg-purple-600 text-white px-4 py-2 rounded"
+          className="rounded bg-purple-600 px-4 py-2 text-white"
         >
           Players
         </Link>
 
       </div>
 
+      {/* TITLE */}
+
       <h1 className="text-3xl font-bold">
         Create New Round
       </h1>
 
+      <p className="mt-2 text-gray-600">
+        Set up your round and select
+        the players.
+      </p>
+
+      {/* ERROR */}
+
+      {error && (
+        <div className="mt-6 rounded border border-red-300 bg-red-50 p-4 text-red-700">
+          {error}
+        </div>
+      )}
+
       <div className="mt-6 space-y-6">
 
-        {/* Round Name */}
+        {/* ROUND NAME */}
 
         <div>
 
-          <label className="block font-semibold mb-2">
+          <label className="mb-2 block font-semibold">
             Round Name
           </label>
 
           <input
-            className="border p-2 rounded w-full"
+            className="w-full rounded border p-3"
             placeholder="Saturday Quota Game"
             value={roundName}
             onChange={(e) =>
@@ -318,16 +418,16 @@ export default function NewRoundPage() {
 
         </div>
 
-        {/* Course */}
+        {/* COURSE */}
 
         <div>
 
-          <label className="block font-semibold mb-2">
+          <label className="mb-2 block font-semibold">
             Course
           </label>
 
           <select
-            className="border p-2 rounded w-full"
+            className="w-full rounded border p-3"
             value={course}
             onChange={(e) =>
               setCourse(
@@ -336,42 +436,49 @@ export default function NewRoundPage() {
             }
           >
 
-            <option>
-              KickingBird Golf Club
-            </option>
-
-            <option>
-              The Golf Club of Edmond
-            </option>
+            {COURSE_NAMES.map(
+              (courseName) => (
+                <option
+                  key={
+                    courseName
+                  }
+                  value={
+                    courseName
+                  }
+                >
+                  {courseName}
+                </option>
+              )
+            )}
 
           </select>
 
         </div>
 
-        {/* Tee */}
+        {/* TEES */}
 
         <div>
 
-          <label className="block font-semibold mb-2">
+          <label className="mb-2 block font-semibold">
             Tees
           </label>
 
-          <div className="border rounded p-3 bg-gray-50">
+          <div className="rounded border bg-gray-50 p-3">
             White Tees
           </div>
 
         </div>
 
-        {/* Holes */}
+        {/* HOLES */}
 
         <div>
 
-          <label className="block font-semibold mb-2">
+          <label className="mb-2 block font-semibold">
             Holes
           </label>
 
           <select
-            className="border p-2 rounded w-full"
+            className="w-full rounded border p-3"
             value={holes}
             onChange={(e) =>
               setHoles(
@@ -381,37 +488,46 @@ export default function NewRoundPage() {
           >
 
             <option value="9">
-              9
+              9 Holes
             </option>
 
             <option value="18">
-              18
+              18 Holes
             </option>
 
           </select>
 
         </div>
 
-        {/* Course Preview */}
+        {/* COURSE PAR */}
 
-        <div className="border rounded-lg p-4">
+        <div className="rounded-lg border bg-white p-5">
 
-          <h2 className="font-bold text-lg mb-3">
-            White Tee Course Par
-          </h2>
+          <div className="mb-4 flex items-center justify-between">
 
-          <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+            <h2 className="text-lg font-bold">
+              White Tee Course Par
+            </h2>
+
+            <div className="text-xl font-bold">
+              Par {totalPar}
+            </div>
+
+          </div>
+
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-6 md:grid-cols-9">
 
             {selectedHoles.map(
               (par, index) => (
 
                 <div
                   key={index}
-                  className="border rounded p-2 text-center"
+                  className="rounded border bg-gray-50 p-2 text-center"
                 >
 
                   <div className="text-xs text-gray-500">
-                    Hole {index + 1}
+                    Hole{" "}
+                    {index + 1}
                   </div>
 
                   <div className="text-xl font-bold">
@@ -425,35 +541,72 @@ export default function NewRoundPage() {
 
           </div>
 
-          <div className="mt-4 text-lg">
-            Course Par:{" "}
-            <strong>
-              {totalPar}
-            </strong>
-          </div>
-
         </div>
 
-        {/* Players */}
+        {/* PLAYERS */}
 
         <div>
 
-          <h2 className="text-xl font-bold mb-3">
-            Select Players
-          </h2>
+          <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 
-          {players.length === 0 ? (
+            <div>
 
-            <div className="border rounded p-4">
+              <h2 className="text-xl font-bold">
+                Select Players
+              </h2>
 
-              <p className="text-gray-600 mb-3">
+              <p className="text-sm text-gray-500">
+                Check the players who
+                are playing this round.
+              </p>
+
+            </div>
+
+            {players.length > 0 && (
+
+              <div className="flex gap-2">
+
+                <button
+                  type="button"
+                  onClick={
+                    selectAllPlayers
+                  }
+                  className="rounded bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700"
+                >
+                  Select All
+                </button>
+
+                <button
+                  type="button"
+                  onClick={
+                    clearAllPlayers
+                  }
+                  className="rounded bg-gray-500 px-3 py-2 text-sm text-white hover:bg-gray-600"
+                >
+                  Clear All
+                </button>
+
+              </div>
+
+            )}
+
+          </div>
+
+          {/* NO PLAYERS */}
+
+          {players.length ===
+          0 ? (
+
+            <div className="rounded border bg-white p-5">
+
+              <p className="mb-4 text-gray-600">
                 No players have been
                 added yet.
               </p>
 
               <Link
                 href="/players"
-                className="bg-blue-600 text-white px-4 py-2 rounded inline-block"
+                className="inline-block rounded bg-blue-600 px-4 py-2 text-white"
               >
                 Add Players
               </Link>
@@ -465,42 +618,68 @@ export default function NewRoundPage() {
             <div className="space-y-2">
 
               {players.map(
-                (player) => (
+                (player) => {
 
-                  <label
-                    key={player.id}
-                    className="flex items-center gap-3 border rounded p-3 cursor-pointer hover:bg-gray-50"
-                  >
+                  const isSelected =
+                    selectedPlayers.includes(
+                      player.id
+                    );
 
-                    <input
-                      type="checkbox"
-                      checked={selectedPlayers.includes(
+                  return (
+
+                    <label
+                      key={
                         player.id
-                      )}
-                      onChange={() =>
-                        togglePlayer(
-                          player.id
-                        )
                       }
-                      className="w-5 h-5"
-                    />
+                      className={`flex cursor-pointer items-center gap-3 rounded border p-4 transition ${
+                        isSelected
+                          ? "border-blue-500 bg-blue-50"
+                          : "hover:bg-gray-50"
+                      }`}
+                    >
 
-                    <div>
+                      <input
+                        type="checkbox"
+                        checked={
+                          isSelected
+                        }
+                        onChange={() =>
+                          togglePlayer(
+                            player.id
+                          )
+                        }
+                        className="h-5 w-5"
+                      />
 
-                      <div className="font-semibold">
-                        {player.name}
+                      <div className="flex-1">
+
+                        <div className="text-lg font-semibold">
+                          {
+                            player.name
+                          }
+                        </div>
+
+                        <div className="text-sm text-gray-500">
+                          Quota:{" "}
+                          {
+                            player.quota
+                          }
+                        </div>
+
                       </div>
 
-                      <div className="text-sm text-gray-500">
-                        Quota:{" "}
-                        {player.quota}
-                      </div>
+                      {isSelected && (
 
-                    </div>
+                        <div className="font-semibold text-blue-600">
+                          Selected
+                        </div>
 
-                  </label>
+                      )}
 
-                )
+                    </label>
+
+                  );
+                }
               )}
 
             </div>
@@ -509,12 +688,11 @@ export default function NewRoundPage() {
 
         </div>
 
-        {/* Selected Count */}
+        {/* SELECTED COUNT */}
 
-        {selectedPlayers.length >
-          0 && (
+        {players.length > 0 && (
 
-          <div className="bg-gray-100 rounded p-4">
+          <div className="rounded bg-gray-100 p-4">
 
             <strong>
               {
@@ -532,16 +710,25 @@ export default function NewRoundPage() {
 
         )}
 
-        {/* Start Round */}
+        {/* START ROUND */}
 
         <button
-          onClick={createRound}
-          disabled={
-            players.length === 0
+          type="button"
+          onClick={
+            createRound
           }
-          className="bg-green-600 text-white px-6 py-3 rounded font-semibold disabled:bg-gray-400"
+          disabled={
+            saving ||
+            players.length ===
+              0 ||
+            selectedPlayers.length ===
+              0
+          }
+          className="w-full rounded bg-green-600 px-6 py-4 text-lg font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-400"
         >
-          Start Round
+          {saving
+            ? "Starting Round..."
+            : "Start Round"}
         </button>
 
       </div>
