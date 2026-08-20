@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
@@ -11,656 +11,637 @@ type Player = {
   quota: number;
 };
 
-type Round = {
-  id: number;
-  name: string;
-  course: string;
-  holes: number;
-  playerIds: string[];
-  pars: number[];
-};
-
-const COURSES: Record<string, number[]> = {
-  "KickingBird Golf Club": [
-    4, 4, 3, 5, 4, 3, 4, 4, 4,
-    4, 3, 5, 4, 3, 5, 3, 4, 4,
-  ],
-
-  "The Golf Club of Edmond": [
-    4, 5, 3, 4, 4, 4, 3, 4, 5,
-    3, 4, 4, 4, 3, 4, 4, 3, 5,
-  ],
-};
-
-const COURSE_NAMES = Object.keys(COURSES);
-
-export default function NewRoundPage() {
+export default function PlayersPage() {
   const router = useRouter();
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   const [players, setPlayers] = useState<Player[]>([]);
-  const [selectedPlayers, setSelectedPlayers] =
-    useState<string[]>([]);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  const [roundName, setRoundName] = useState("");
-  const [course, setCourse] =
-    useState("KickingBird Golf Club");
-  const [holes, setHoles] = useState("18");
+  const [name, setName] = useState("");
+  const [quota, setQuota] = useState("0");
 
-  const [loadingPlayers, setLoadingPlayers] =
-    useState(true);
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const [creatingRound, setCreatingRound] =
-    useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editQuota, setEditQuota] = useState("0");
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
 
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
 
-  /*
-   * LOAD PLAYERS FROM SUPABASE
-   */
   useEffect(() => {
-    loadPlayers();
+    loadPage();
   }, []);
 
-  async function loadPlayers() {
-    setLoadingPlayers(true);
+  async function loadPage() {
+    setLoading(true);
     setError("");
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    try {
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
 
-    if (!user) {
-      window.location.href = "/login";
-      return;
+      if (userError) {
+        throw userError;
+      }
+
+      if (!user) {
+        router.replace("/login");
+        return;
+      }
+
+      const [profileResult, playersResult] = await Promise.all([
+        supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", user.id)
+          .single(),
+
+        supabase
+          .from("players")
+          .select("id, name, quota")
+          .order("name"),
+      ]);
+
+      if (profileResult.error) {
+        throw profileResult.error;
+      }
+
+      if (playersResult.error) {
+        throw playersResult.error;
+      }
+
+      setIsAdmin(profileResult.data?.role === "admin");
+
+      setPlayers(
+        (playersResult.data || []).map((player) => ({
+          id: String(player.id),
+          name: String(player.name),
+          quota: Number(player.quota),
+        }))
+      );
+    } catch (error: any) {
+      console.error("Could not load players page:", error);
+
+      setError(
+        error?.message ||
+          error?.details ||
+          "Could not load players."
+      );
+    } finally {
+      setLoading(false);
     }
-
-    const { data, error } = await supabase
-      .from("players")
-      .select("id, name, quota")
-      .order("name");
-
-    if (error) {
-      console.error("Could not load players:", error);
-      setError(error.message);
-      setLoadingPlayers(false);
-      return;
-    }
-
-    setPlayers(data || []);
-    setLoadingPlayers(false);
   }
 
-  /*
-   * SELECT / DESELECT PLAYER
-   */
-  function togglePlayer(playerId: string) {
-    setSelectedPlayers((currentPlayers) => {
-      if (currentPlayers.includes(playerId)) {
-        return currentPlayers.filter(
-          (id) => id !== playerId
+  async function addPlayer(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!isAdmin) {
+      setError("Only an administrator can add players.");
+      return;
+    }
+
+    const cleanName = name.trim();
+    const numericQuota = Number(quota);
+
+    if (!cleanName) {
+      setError("Please enter a player name.");
+      return;
+    }
+
+    if (
+      !Number.isFinite(numericQuota) ||
+      numericQuota < 0
+    ) {
+      setError("Quota must be 0 or greater.");
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const {
+        data,
+        error,
+      } = await supabase
+        .from("players")
+        .insert({
+          name: cleanName,
+          quota: numericQuota,
+        })
+        .select("id, name, quota")
+        .single();
+
+      if (error) {
+        throw error;
+      }
+
+      if (!data) {
+        throw new Error(
+          "Player was added but no player record was returned."
         );
       }
 
-      return [...currentPlayers, playerId];
-    });
-  }
+      const newPlayer: Player = {
+        id: String(data.id),
+        name: String(data.name),
+        quota: Number(data.quota),
+      };
 
-  /*
-   * SELECT ALL
-   */
-  function selectAllPlayers() {
-    setSelectedPlayers(
-      players.map((player) => player.id)
-    );
-  }
+      setPlayers((current) =>
+        [...current, newPlayer].sort((a, b) =>
+          a.name.localeCompare(b.name)
+        )
+      );
 
-  /*
-   * CLEAR ALL
-   */
-  function clearAllPlayers() {
-    setSelectedPlayers([]);
-  }
+      setName("");
+      setQuota("0");
+      setMessage(`${newPlayer.name} was added.`);
+    } catch (error: any) {
+      console.error("Could not add player:", error);
 
-  /*
-   * CREATE ROUND
-   */
-  async function createRound() {
-    setError("");
-
-    if (!roundName.trim()) {
-      setError("Please enter a round name.");
-      return;
-    }
-
-    if (selectedPlayers.length === 0) {
-      setError("Please select at least one player.");
-      return;
-    }
-
-    const numberOfHoles = Number(holes);
-
-    const coursePars = COURSES[course];
-
-    if (!coursePars) {
       setError(
-        "Could not find the par information for this course."
+        error?.message ||
+          error?.details ||
+          "Could not add the player."
       );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+
+  function startEditing(player: Player) {
+    if (!isAdmin) {
       return;
     }
 
-    const selectedPars = coursePars.slice(
-      0,
-      numberOfHoles
-    );
-
-    setCreatingRound(true);
-
-    /*
-     * For now, save the round in localStorage
-     * using the selected Supabase player IDs.
-     *
-     * This keeps compatibility with your
-     * existing round/scorecard pages.
-     */
-
-    const newRound: Round = {
-      id: Date.now(),
-      name: roundName.trim(),
-      course,
-      holes: numberOfHoles,
-      playerIds: selectedPlayers,
-      pars: selectedPars,
-    };
-
-    let rounds: Round[] = [];
-
-    try {
-      const savedRounds =
-        localStorage.getItem("rounds");
-
-      if (savedRounds) {
-        const parsedRounds =
-          JSON.parse(savedRounds);
-
-        if (Array.isArray(parsedRounds)) {
-          rounds = parsedRounds;
-        }
-      }
-    } catch (error) {
-      console.error(
-        "Could not load existing rounds:",
-        error
-      );
-    }
-
-    rounds.push(newRound);
-
-    localStorage.setItem(
-      "rounds",
-      JSON.stringify(rounds)
-    );
-
-    /*
-     * Remove any old scorecard associated
-     * with this round ID.
-     */
-    try {
-      const savedScorecards =
-        localStorage.getItem("scorecards");
-
-      if (savedScorecards) {
-        const scorecards =
-          JSON.parse(savedScorecards);
-
-        if (Array.isArray(scorecards)) {
-          const cleaned =
-            scorecards.filter(
-              (card: any) =>
-                card.roundId !== newRound.id
-            );
-
-          localStorage.setItem(
-            "scorecards",
-            JSON.stringify(cleaned)
-          );
-        }
-      }
-    } catch (error) {
-      console.error(
-        "Could not clean scorecards:",
-        error
-      );
-    }
-
-    router.push(
-      `/rounds/${newRound.id}`
-    );
+    setEditingId(player.id);
+    setEditName(player.name);
+    setEditQuota(String(player.quota));
+    setError("");
+    setMessage("");
   }
 
-  /*
-   * CURRENT COURSE PARS
-   */
-  const selectedCoursePars =
-    COURSES[course] || [];
+  function cancelEditing() {
+    setEditingId(null);
+    setEditName("");
+    setEditQuota("0");
+  }
 
-  const selectedHoles =
-    selectedCoursePars.slice(
-      0,
-      Number(holes)
+  async function savePlayerEdits(playerId: string) {
+    if (!isAdmin) {
+      setError("Only an administrator can edit players.");
+      return;
+    }
+
+    const cleanName = editName.trim();
+    const numericQuota = Number(editQuota);
+
+    if (!cleanName) {
+      setError("Please enter a player name.");
+      return;
+    }
+
+    if (!Number.isFinite(numericQuota) || numericQuota < 0) {
+      setError("Quota must be 0 or greater.");
+      return;
+    }
+
+    setUpdatingId(playerId);
+    setError("");
+    setMessage("");
+
+    try {
+      const { data, error } = await supabase
+        .from("players")
+        .update({
+          name: cleanName,
+          quota: numericQuota,
+        })
+        .eq("id", playerId)
+        .select("id, name, quota")
+        .single();
+
+      if (error) {
+        throw error;
+      }
+
+      if (!data) {
+        throw new Error("No updated player record was returned.");
+      }
+
+      const updatedPlayer: Player = {
+        id: String(data.id),
+        name: String(data.name),
+        quota: Number(data.quota),
+      };
+
+      setPlayers((current) =>
+        current
+          .map((player) =>
+            player.id === playerId ? updatedPlayer : player
+          )
+          .sort((a, b) => a.name.localeCompare(b.name))
+      );
+
+      setEditingId(null);
+      setEditName("");
+      setEditQuota("0");
+      setMessage(`${updatedPlayer.name} was updated.`);
+    } catch (error: any) {
+      console.error("Could not update player:", error);
+
+      setError(
+        error?.message ||
+          error?.details ||
+          "Could not update the player."
+      );
+    } finally {
+      setUpdatingId(null);
+    }
+  }
+
+  async function deletePlayer(player: Player) {
+    if (!isAdmin) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete ${player.name}? This will remove the player from the player list.`
     );
 
-  const totalPar =
-    selectedHoles.reduce(
-      (total, par) => total + par,
-      0
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingId(player.id);
+    setError("");
+    setMessage("");
+
+    try {
+      /*
+       * Remove the player from round membership first.
+       * If you have foreign-key cascade rules, this is still safe.
+       */
+      const {
+        error: roundPlayerError,
+      } = await supabase
+        .from("round_players")
+        .delete()
+        .eq("player_id", player.id);
+
+      if (roundPlayerError) {
+        throw roundPlayerError;
+      }
+
+      /*
+       * Remove scores belonging to this player.
+       */
+      const {
+        error: scoreError,
+      } = await supabase
+        .from("scores")
+        .delete()
+        .eq("player_id", player.id);
+
+      if (scoreError) {
+        throw scoreError;
+      }
+
+      /*
+       * Unlink any user profile from this player
+       * before deleting the player record.
+       */
+      const {
+        error: unlinkError,
+      } = await supabase
+        .from("profiles")
+        .update({
+          player_id: null,
+        })
+        .eq("player_id", player.id);
+
+      if (unlinkError) {
+        throw unlinkError;
+      }
+
+      const {
+        error: deleteError,
+      } = await supabase
+        .from("players")
+        .delete()
+        .eq("id", player.id);
+
+      if (deleteError) {
+        throw deleteError;
+      }
+
+      setPlayers((current) =>
+        current.filter(
+          (existingPlayer) =>
+            existingPlayer.id !== player.id
+        )
+      );
+
+      setMessage(`${player.name} was deleted.`);
+    } catch (error: any) {
+      console.error("Could not delete player:", error);
+
+      setError(
+        error?.message ||
+          error?.details ||
+          "Could not delete the player."
+      );
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  if (loading) {
+    return (
+      <main className="mx-auto max-w-4xl p-8">
+        <p>Loading players...</p>
+      </main>
     );
+  }
 
   return (
-    <main className="min-h-screen bg-gray-100 p-6">
+    <main className="mx-auto max-w-4xl p-6 md:p-8">
+      <div className="mb-6 flex flex-wrap gap-3">
+        <Link
+          href="/"
+          className="rounded bg-gray-600 px-4 py-2 text-white hover:bg-gray-700"
+        >
+          Home
+        </Link>
 
-      <div className="mx-auto max-w-4xl">
+        <Link
+          href="/rounds"
+          className="rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
+        >
+          Rounds
+        </Link>
 
-        {/* NAVIGATION */}
-
-        <div className="mb-6 flex flex-wrap gap-3">
-
+        {isAdmin && (
           <Link
-            href="/"
-            className="rounded bg-gray-500 px-4 py-2 text-white hover:bg-gray-600"
+            href="/rounds/new"
+            className="rounded bg-green-600 px-4 py-2 text-white hover:bg-green-700"
           >
-            ← Home
+            New Round
           </Link>
+        )}
+      </div>
 
-          <Link
-            href="/rounds"
-            className="rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
-          >
-            Rounds
-          </Link>
-
-          <Link
-            href="/players"
-            className="rounded bg-purple-600 px-4 py-2 text-white hover:bg-purple-700"
-          >
-            Players
-          </Link>
-
-        </div>
-
-        {/* TITLE */}
-
+      <div className="mb-8">
         <h1 className="text-3xl font-bold">
-          Create New Round
+          Players
         </h1>
 
         <p className="mt-2 text-gray-600">
-          Set up the course and select the
-          players for this round.
+          {isAdmin
+            ? "Add and manage golfers and their starting quotas."
+            : "View golfers and their current quotas."}
         </p>
-
-        {/* ERROR */}
-
-        {error && (
-          <div className="mt-6 rounded border border-red-300 bg-red-50 p-4 text-red-700">
-            {error}
-          </div>
-        )}
-
-        <div className="mt-6 space-y-6">
-
-          {/* ROUND NAME */}
-
-          <div className="rounded-lg bg-white p-6 shadow">
-
-            <label className="mb-2 block font-semibold">
-              Round Name
-            </label>
-
-            <input
-              className="w-full rounded border px-3 py-2"
-              placeholder="Saturday Quota Game"
-              value={roundName}
-              onChange={(e) =>
-                setRoundName(e.target.value)
-              }
-            />
-
-          </div>
-
-          {/* COURSE SETTINGS */}
-
-          <div className="rounded-lg bg-white p-6 shadow">
-
-            <h2 className="text-xl font-bold">
-              Course Settings
-            </h2>
-
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
-
-              {/* COURSE */}
-
-              <div>
-
-                <label className="mb-2 block font-semibold">
-                  Course
-                </label>
-
-                <select
-                  className="w-full rounded border px-3 py-2"
-                  value={course}
-                  onChange={(e) =>
-                    setCourse(e.target.value)
-                  }
-                >
-
-                  {COURSE_NAMES.map(
-                    (courseName) => (
-                      <option
-                        key={courseName}
-                        value={courseName}
-                      >
-                        {courseName}
-                      </option>
-                    )
-                  )}
-
-                </select>
-
-              </div>
-
-              {/* HOLES */}
-
-              <div>
-
-                <label className="mb-2 block font-semibold">
-                  Holes
-                </label>
-
-                <select
-                  className="w-full rounded border px-3 py-2"
-                  value={holes}
-                  onChange={(e) =>
-                    setHoles(e.target.value)
-                  }
-                >
-
-                  <option value="9">
-                    9 Holes
-                  </option>
-
-                  <option value="18">
-                    18 Holes
-                  </option>
-
-                </select>
-
-              </div>
-
-            </div>
-
-            {/* TEES */}
-
-            <div className="mt-4">
-
-              <label className="mb-2 block font-semibold">
-                Tees
-              </label>
-
-              <div className="rounded border bg-gray-50 p-3">
-                White Tees
-              </div>
-
-            </div>
-
-          </div>
-
-          {/* COURSE PAR */}
-
-          <div className="rounded-lg bg-white p-6 shadow">
-
-            <div className="flex items-center justify-between">
-
-              <h2 className="text-xl font-bold">
-                White Tee Course Par
-              </h2>
-
-              <div className="text-xl font-bold">
-                Par {totalPar}
-              </div>
-
-            </div>
-
-            <div className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-6 md:grid-cols-9">
-
-              {selectedHoles.map(
-                (par, index) => (
-
-                  <div
-                    key={index}
-                    className="rounded border bg-gray-50 p-2 text-center"
-                  >
-
-                    <div className="text-xs text-gray-500">
-                      Hole {index + 1}
-                    </div>
-
-                    <div className="text-xl font-bold">
-                      {par}
-                    </div>
-
-                  </div>
-
-                )
-              )}
-
-            </div>
-
-            <div className="mt-4 text-lg">
-              Course Par:{" "}
-              <strong>{totalPar}</strong>
-            </div>
-
-          </div>
-
-          {/* PLAYERS */}
-
-          <div className="rounded-lg bg-white p-6 shadow">
-
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-
-              <div>
-
-                <h2 className="text-xl font-bold">
-                  Select Players
-                </h2>
-
-                <p className="mt-1 text-sm text-gray-500">
-                  Check the players who will play
-                  in this round.
-                </p>
-
-              </div>
-
-              {players.length > 0 && (
-
-                <div className="flex gap-2">
-
-                  <button
-                    type="button"
-                    onClick={selectAllPlayers}
-                    className="rounded bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
-                  >
-                    Select All
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={clearAllPlayers}
-                    className="rounded bg-gray-500 px-3 py-2 text-sm font-semibold text-white hover:bg-gray-600"
-                  >
-                    Clear All
-                  </button>
-
-                </div>
-
-              )}
-
-            </div>
-
-            {/* LOADING */}
-
-            {loadingPlayers && (
-
-              <div className="mt-6 rounded border bg-gray-50 p-5 text-gray-600">
-                Loading players...
-              </div>
-
-            )}
-
-            {/* NO PLAYERS */}
-
-            {!loadingPlayers &&
-              players.length === 0 && (
-
-                <div className="mt-6 rounded border border-yellow-300 bg-yellow-50 p-5">
-
-                  <p className="font-semibold text-yellow-800">
-                    No players found.
-                  </p>
-
-                  <p className="mt-1 text-sm text-yellow-700">
-                    Go to the Players page and
-                    add a player first.
-                  </p>
-
-                  <Link
-                    href="/players"
-                    className="mt-4 inline-block rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
-                  >
-                    Go to Players
-                  </Link>
-
-                </div>
-
-              )}
-
-            {/* PLAYER LIST */}
-
-            {!loadingPlayers &&
-              players.length > 0 && (
-
-                <div className="mt-6 space-y-2">
-
-                  {players.map((player) => {
-
-                    const isSelected =
-                      selectedPlayers.includes(
-                        player.id
-                      );
-
-                    return (
-
-                      <label
-                        key={player.id}
-                        className={`flex cursor-pointer items-center gap-4 rounded-lg border p-4 transition ${
-                          isSelected
-                            ? "border-blue-500 bg-blue-50"
-                            : "hover:bg-gray-50"
-                        }`}
-                      >
-
-                        {/* CHECKBOX */}
-
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() =>
-                            togglePlayer(
-                              player.id
-                            )
-                          }
-                          className="h-5 w-5 cursor-pointer"
-                        />
-
-                        {/* PLAYER INFO */}
-
-                        <div className="flex-1">
-
-                          <div className="text-lg font-semibold">
-                            {player.name}
-                          </div>
-
-                          <div className="text-sm text-gray-500">
-                            Quota:{" "}
-                            {player.quota}
-                          </div>
-
-                        </div>
-
-                        {/* SELECTED */}
-
-                        {isSelected && (
-
-                          <span className="font-semibold text-blue-600">
-                            Selected
-                          </span>
-
-                        )}
-
-                      </label>
-
-                    );
-                  })}
-
-                </div>
-
-              )}
-
-            {/* SELECTED COUNT */}
-
-            {!loadingPlayers &&
-              players.length > 0 && (
-
-                <div className="mt-4 rounded bg-gray-100 p-4">
-
-                  <strong>
-                    {selectedPlayers.length}
-                  </strong>{" "}
-                  player
-                  {selectedPlayers.length !== 1
-                    ? "s"
-                    : ""}{" "}
-                  selected
-
-                </div>
-
-              )}
-
-          </div>
-
-          {/* START ROUND */}
-
-          <button
-            type="button"
-            onClick={createRound}
-            disabled={
-              loadingPlayers ||
-              players.length === 0 ||
-              selectedPlayers.length === 0 ||
-              creatingRound
-            }
-            className="w-full rounded bg-green-600 px-6 py-4 text-lg font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-400"
-          >
-            {creatingRound
-              ? "Starting Round..."
-              : "Start Round"}
-          </button>
-
-        </div>
-
       </div>
 
+      {error && (
+        <div className="mb-6 rounded border border-red-300 bg-red-50 p-4 text-red-700">
+          {error}
+        </div>
+      )}
+
+      {message && (
+        <div className="mb-6 rounded border border-green-300 bg-green-50 p-4 text-green-800">
+          {message}
+        </div>
+      )}
+
+      {isAdmin && (
+        <section className="mb-8 rounded-lg border bg-white p-6 shadow-sm">
+          <h2 className="text-xl font-bold">
+            Add New Player
+          </h2>
+
+          <p className="mt-1 text-sm text-gray-600">
+            After adding the player, link that player to a user account from Manage Users.
+          </p>
+
+          <form
+            onSubmit={addPlayer}
+            className="mt-5 grid gap-4 md:grid-cols-[1fr_180px_auto]"
+          >
+            <div>
+              <label className="mb-2 block font-semibold">
+                Player Name
+              </label>
+
+              <input
+                type="text"
+                value={name}
+                onChange={(event) =>
+                  setName(event.target.value)
+                }
+                placeholder="Player name"
+                className="w-full rounded border px-3 py-2"
+                disabled={saving}
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block font-semibold">
+                Starting Quota
+              </label>
+
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={quota}
+                onChange={(event) =>
+                  setQuota(event.target.value)
+                }
+                className="w-full rounded border px-3 py-2"
+                disabled={saving}
+              />
+            </div>
+
+            <div className="flex items-end">
+              <button
+                type="submit"
+                disabled={saving}
+                className="w-full rounded bg-purple-600 px-5 py-2 font-semibold text-white hover:bg-purple-700 disabled:cursor-not-allowed disabled:bg-gray-400"
+              >
+                {saving
+                  ? "Adding..."
+                  : "+ Add Player"}
+              </button>
+            </div>
+          </form>
+
+          <div className="mt-4">
+            <Link
+              href="/admin/users"
+              className="text-sm font-semibold text-blue-700 hover:underline"
+            >
+              Manage Users / Link Player Accounts
+            </Link>
+          </div>
+        </section>
+      )}
+
+      <section className="rounded-lg border bg-white p-6 shadow-sm">
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-bold">
+              Player List
+            </h2>
+
+            <p className="text-sm text-gray-500">
+              {players.length} player
+              {players.length === 1 ? "" : "s"}
+            </p>
+          </div>
+
+          {isAdmin && (
+            <Link
+              href="/rounds/new"
+              className="rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+            >
+              Create Round
+            </Link>
+          )}
+        </div>
+
+        {players.length === 0 ? (
+          <div className="rounded border border-yellow-300 bg-yellow-50 p-5 text-yellow-800">
+            No players have been added yet.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {players.map((player) => {
+              const isEditing = editingId === player.id;
+
+              return (
+                <div
+                  key={player.id}
+                  className="rounded-lg border p-4"
+                >
+                  {isEditing ? (
+                    <div className="grid gap-4 md:grid-cols-[1fr_180px_auto] md:items-end">
+                      <div>
+                        <label className="mb-2 block font-semibold">
+                          Player Name
+                        </label>
+
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(event) =>
+                            setEditName(event.target.value)
+                          }
+                          className="w-full rounded border px-3 py-2"
+                          disabled={updatingId === player.id}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="mb-2 block font-semibold">
+                          Quota
+                        </label>
+
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={editQuota}
+                          onChange={(event) =>
+                            setEditQuota(event.target.value)
+                          }
+                          className="w-full rounded border px-3 py-2"
+                          disabled={updatingId === player.id}
+                        />
+                      </div>
+
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            savePlayerEdits(player.id)
+                          }
+                          disabled={updatingId === player.id}
+                          className="rounded bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-400"
+                        >
+                          {updatingId === player.id
+                            ? "Saving..."
+                            : "Save"}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={cancelEditing}
+                          disabled={updatingId === player.id}
+                          className="rounded bg-gray-500 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-600 disabled:cursor-not-allowed disabled:bg-gray-400"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <div className="text-lg font-semibold">
+                          {player.name}
+                        </div>
+
+                        <div className="text-sm text-gray-500">
+                          Current Quota:{" "}
+                          <strong>{player.quota}</strong>
+                        </div>
+                      </div>
+
+                      {isAdmin && (
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => startEditing(player)}
+                            className="rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                          >
+                            Edit
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              deletePlayer(player)
+                            }
+                            disabled={
+                              deletingId === player.id
+                            }
+                            className="rounded bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-gray-400"
+                          >
+                            {deletingId === player.id
+                              ? "Deleting..."
+                              : "Delete"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
     </main>
   );
 }

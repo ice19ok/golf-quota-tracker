@@ -34,6 +34,13 @@ export default function HomePage() {
           Players
         </Link>
 
+        <Link
+          href="/account"
+          className="rounded bg-purple-600 px-4 py-2 text-white"
+        >
+          Account
+        </Link>
+
         <LogoutButton />
       </div>
     </main>
