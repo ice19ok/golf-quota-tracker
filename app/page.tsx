@@ -3,7 +3,7 @@ import Link from "next/link";
 
 export default function HomePage() {
   return (
-    <main className="p-8 max-w-4xl mx-auto">
+    <main className="mx-auto max-w-4xl p-8">
       <h1 className="text-3xl font-bold">
         Golf Quota Tracker
       </h1>
@@ -12,7 +12,14 @@ export default function HomePage() {
         Track rounds, scores, and quota results.
       </p>
 
-      <div className="mt-6 flex gap-4">
+      <div className="mt-6 flex flex-wrap gap-4">
+        <Link
+          href="/rounds"
+          className="rounded bg-green-600 px-4 py-2 text-white"
+        >
+          Rounds
+        </Link>
+
         <Link
           href="/rounds/new"
           className="rounded bg-blue-600 px-4 py-2 text-white"
@@ -26,6 +33,7 @@ export default function HomePage() {
         >
           Players
         </Link>
+
         <LogoutButton />
       </div>
     </main>
