@@ -23,6 +23,7 @@ export default function RoundPage({ params }: { params: Promise<{ id: string }> 
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
+  const [finishingRound, setFinishingRound] = useState(false);
   const [error, setError] = useState("");
   const [quotaPoints, setQuotaPoints] = useState<QuotaPoints>(DEFAULT_QUOTA_POINTS);
 
@@ -74,7 +75,7 @@ export default function RoundPage({ params }: { params: Promise<{ id: string }> 
     return a.name.localeCompare(b.name);
   });
 
-  function canEdit(playerId: string) { return isAdmin || currentPlayerId === playerId; }
+  function canEdit(playerId: string) { return !round?.is_complete && (isAdmin || currentPlayerId === playerId); }
 
   async function updateScore(playerId: string, hole: number, raw: string) {
     if (!round || !canEdit(playerId)) return;
@@ -107,7 +108,9 @@ export default function RoundPage({ params }: { params: Promise<{ id: string }> 
   }
 
   async function finishRound() {
-    if (!isAdmin || !round || round.is_complete) return;
+    if (!isAdmin || !round || round.is_complete || finishingRound) {
+      return;
+    }
 
     if (
       !window.confirm(
@@ -117,11 +120,58 @@ export default function RoundPage({ params }: { params: Promise<{ id: string }> 
       return;
     }
 
+    setFinishingRound(true);
     setError("");
     setMessage("Finishing round...");
 
+    /*
+     * FIRST CLAIM THE ROUND.
+     *
+     * This update only succeeds while is_complete is false.
+     * It prevents a second click, refresh, or another admin
+     * from running the quota update again.
+     */
+    const completedAt = new Date().toISOString();
+
+    const {
+      data: claimedRound,
+      error: claimError,
+    } = await supabase
+      .from("rounds")
+      .update({
+        is_complete: true,
+        completed_at: completedAt,
+      })
+      .eq("id", round.id)
+      .eq("is_complete", false)
+      .select("id")
+      .maybeSingle();
+
+    if (claimError) {
+      setError(claimError.message);
+      setMessage("");
+      setFinishingRound(false);
+      return;
+    }
+
+    /*
+     * If no row was returned, another completion already
+     * claimed this round. Do NOT touch quotas again.
+     */
+    if (!claimedRound) {
+      setRound((current) =>
+        current ? { ...current, is_complete: true } : current
+      );
+      setMessage(
+        "This round was already completed. Quotas were not updated again."
+      );
+      setFinishingRound(false);
+      return;
+    }
+
     const quotaUpdates = players.map((p) => ({
       id: p.id,
+      oldQuota: p.quota,
       newQuota: newQuota(p.quota, getPoints(p.id)),
     }));
 
@@ -132,26 +182,26 @@ export default function RoundPage({ params }: { params: Promise<{ id: string }> 
         .eq("id", update.id);
 
       if (error) {
-        setError(error.message);
+        /*
+         * Re-open the round if an update failed, but do not
+         * automatically retry quotas. This makes the failure visible
+         * instead of silently applying another adjustment.
+         */
+        await supabase
+          .from("rounds")
+          .update({
+            is_complete: false,
+            completed_at: null,
+          })
+          .eq("id", round.id);
+
+        setError(
+          `Quota update failed: ${error.message}. The round was left open so it can be corrected safely.`
+        );
         setMessage("");
+        setFinishingRound(false);
         return;
       }
-    }
-
-    const completedAt = new Date().toISOString();
-
-    const { error: roundError } = await supabase
-      .from("rounds")
-      .update({
-        is_complete: true,
-        completed_at: completedAt,
-      })
-      .eq("id", round.id);
-
-    if (roundError) {
-      setError(roundError.message);
-      setMessage("");
-      return;
     }
 
     setPlayers((current) =>
@@ -176,11 +226,31 @@ export default function RoundPage({ params }: { params: Promise<{ id: string }> 
         : current
     );
 
-    setMessage("Round completed and quotas updated.");
+    setMessage("Round completed and quotas updated once.");
+    setFinishingRound(false);
   }
 
   if (loading) return <main className="p-8">Loading scorecard...</main>;
   if (!round) return <main className="p-8"><h1 className="text-2xl font-bold">Round Not Found</h1><p className="mt-3 text-red-600">{error}</p></main>;
+
+  if (round.is_complete && !isAdmin) {
+    return (
+      <main className="mx-auto max-w-3xl p-6 md:p-8">
+        <div className="rounded-lg border bg-white p-6 shadow-sm">
+          <h1 className="text-2xl font-bold">Round Completed</h1>
+          <p className="mt-3 text-gray-600">
+            This round is closed and can no longer be reopened.
+          </p>
+          <Link
+            href="/rounds"
+            className="mt-6 inline-block rounded bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700"
+          >
+            Back to Rounds
+          </Link>
+        </div>
+      </main>
+    );
+  }
 
   return <main className="mx-auto max-w-full p-4 md:p-8">
     <div className="mb-6 flex flex-wrap gap-3"><Link href="/" className="rounded bg-gray-500 px-4 py-2 text-white">Home</Link><Link href="/rounds" className="rounded bg-blue-600 px-4 py-2 text-white">Rounds</Link><Link href="/players" className="rounded bg-purple-600 px-4 py-2 text-white">Players</Link></div>
@@ -191,15 +261,17 @@ export default function RoundPage({ params }: { params: Promise<{ id: string }> 
         <button
           type="button"
           onClick={finishRound}
-          disabled={round.is_complete}
+          disabled={round.is_complete || finishingRound}
           className={`rounded px-5 py-3 font-semibold text-white ${
-            round.is_complete
+            round.is_complete || finishingRound
               ? "cursor-not-allowed bg-gray-400"
               : "bg-green-600 hover:bg-green-700"
           }`}
         >
           {round.is_complete
             ? "Round Completed"
+            : finishingRound
+            ? "Finishing..."
             : "Finish Round & Update Quotas"}
         </button>
 

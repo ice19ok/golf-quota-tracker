@@ -94,12 +94,27 @@ export default function RoundsPage() {
                 </p>
               </div>
 
-              <Link
-                href={`/rounds/${round.id}`}
-                className="rounded bg-blue-600 px-4 py-2 text-white"
-              >
-                {round.is_complete ? "View Round" : "Open Round"}
-              </Link>
+              {round.is_complete ? (
+                isAdmin ? (
+                  <Link
+                    href={`/rounds/${round.id}`}
+                    className="rounded bg-gray-600 px-4 py-2 text-white hover:bg-gray-700"
+                  >
+                    View Completed Round
+                  </Link>
+                ) : (
+                  <span className="rounded bg-gray-300 px-4 py-2 font-semibold text-gray-700">
+                    Closed
+                  </span>
+                )
+              ) : (
+                <Link
+                  href={`/rounds/${round.id}`}
+                  className="rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
+                >
+                  Open Round
+                </Link>
+              )}
             </div>
 
             <div className="mt-5 flex flex-wrap gap-2">
