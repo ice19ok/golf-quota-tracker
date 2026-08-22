@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { DEFAULT_QUOTA_POINTS, loadQuotaPoints, calculatePlayerQuotaPoints, type QuotaPoints } from "@/lib/quota";
 
 type Player = { id: string; name: string; quota: number };
-type Round = { id: string; name: string; course: string; holes: number };
+type Round = { id: string; name: string; course: string; holes: number; is_complete: boolean; completed_at?: string | null };
 type ScoreRow = { id?: string; round_id: string; player_id: string; hole: number; score: number };
 
 const COURSES: Record<string, number[]> = {
@@ -37,14 +37,14 @@ export default function RoundPage({ params }: { params: Promise<{ id: string }> 
       setCurrentPlayerId(profileRes.data?.player_id ? String(profileRes.data.player_id) : null);
       setQuotaPoints(loadQuotaPoints());
       const [roundRes, rpRes, playerRes, scoreRes] = await Promise.all([
-        supabase.from("rounds").select("id,name,course,holes").eq("id", id).single(),
+        supabase.from("rounds").select("id,name,course,holes,is_complete,completed_at").eq("id", id).single(),
         supabase.from("round_players").select("player_id").eq("round_id", id),
         supabase.from("players").select("id,name,quota").order("name"),
         supabase.from("scores").select("id,round_id,player_id,hole,score").eq("round_id", id),
       ]);
       const firstError = roundRes.error || rpRes.error || playerRes.error || scoreRes.error;
       if (firstError) { setError(firstError.message); setLoading(false); return; }
-      setRound({ ...roundRes.data, id:String(roundRes.data.id), holes:Number(roundRes.data.holes) });
+      setRound({ ...roundRes.data, id:String(roundRes.data.id), holes:Number(roundRes.data.holes), is_complete:Boolean(roundRes.data.is_complete) });
       const ids = new Set((rpRes.data || []).map(x=>String(x.player_id)));
       setPlayers((playerRes.data || []).filter(p=>ids.has(String(p.id))).map(p=>({id:String(p.id),name:p.name,quota:Number(p.quota)})));
       const map: Record<string, number | ""> = {};
@@ -107,15 +107,76 @@ export default function RoundPage({ params }: { params: Promise<{ id: string }> 
   }
 
   async function finishRound() {
-    if (!isAdmin) return;
-    if (!window.confirm("Finish this round and update all player quotas? This should only be done once.")) return;
-    setMessage("Updating quotas...");
-    for (const p of players) {
-      const { error } = await supabase.from("players").update({ quota: newQuota(p.quota, getPoints(p.id)) }).eq("id", p.id);
-      if (error) { setError(error.message); setMessage(""); return; }
+    if (!isAdmin || !round || round.is_complete) return;
+
+    if (
+      !window.confirm(
+        "Finish this round and update all player quotas? This can only be done once."
+      )
+    ) {
+      return;
     }
-    setPlayers(ps=>ps.map(p=>({...p,quota:newQuota(p.quota,getPoints(p.id))})));
-    setMessage("Quotas updated");
+
+    setError("");
+    setMessage("Finishing round...");
+
+    const quotaUpdates = players.map((p) => ({
+      id: p.id,
+      newQuota: newQuota(p.quota, getPoints(p.id)),
+    }));
+
+    for (const update of quotaUpdates) {
+      const { error } = await supabase
+        .from("players")
+        .update({ quota: update.newQuota })
+        .eq("id", update.id);
+
+      if (error) {
+        setError(error.message);
+        setMessage("");
+        return;
+      }
+    }
+
+    const completedAt = new Date().toISOString();
+
+    const { error: roundError } = await supabase
+      .from("rounds")
+      .update({
+        is_complete: true,
+        completed_at: completedAt,
+      })
+      .eq("id", round.id);
+
+    if (roundError) {
+      setError(roundError.message);
+      setMessage("");
+      return;
+    }
+
+    setPlayers((current) =>
+      current.map((p) => {
+        const update = quotaUpdates.find(
+          (item) => item.id === p.id
+        );
+
+        return update
+          ? { ...p, quota: update.newQuota }
+          : p;
+      })
+    );
+
+    setRound((current) =>
+      current
+        ? {
+            ...current,
+            is_complete: true,
+            completed_at: completedAt,
+          }
+        : current
+    );
+
+    setMessage("Round completed and quotas updated.");
   }
 
   if (loading) return <main className="p-8">Loading scorecard...</main>;
@@ -125,7 +186,30 @@ export default function RoundPage({ params }: { params: Promise<{ id: string }> 
     <div className="mb-6 flex flex-wrap gap-3"><Link href="/" className="rounded bg-gray-500 px-4 py-2 text-white">Home</Link><Link href="/rounds" className="rounded bg-blue-600 px-4 py-2 text-white">Rounds</Link><Link href="/players" className="rounded bg-purple-600 px-4 py-2 text-white">Players</Link></div>
     <div className="flex flex-wrap justify-between gap-4"><div><h1 className="text-3xl font-bold">{round.name}</h1><p className="text-gray-600">{round.course} • White Tees • {round.holes} Holes • Par {totalPar}</p><p className="mt-2 text-sm text-gray-500">{isAdmin ? "Admin: you can edit every player." : currentPlayerId ? "You can see all scores and edit only your own." : "Your login is not linked to a player yet, so scores are view-only."}</p></div><div>{message}</div></div>
     {error && <div className="mt-4 rounded border border-red-300 bg-red-50 p-3 text-red-700">{error}</div>}
-    {isAdmin && <div className="mt-6 rounded border border-green-300 bg-green-50 p-4"><button type="button" onClick={finishRound} className="rounded bg-green-600 px-5 py-3 font-semibold text-white">Finish Round & Update Quotas</button><p className="mt-2 text-sm text-green-800">Use this once after the round is complete.</p></div>}
+    {isAdmin && (
+      <div className="mt-6 rounded border border-green-300 bg-green-50 p-4">
+        <button
+          type="button"
+          onClick={finishRound}
+          disabled={round.is_complete}
+          className={`rounded px-5 py-3 font-semibold text-white ${
+            round.is_complete
+              ? "cursor-not-allowed bg-gray-400"
+              : "bg-green-600 hover:bg-green-700"
+          }`}
+        >
+          {round.is_complete
+            ? "Round Completed"
+            : "Finish Round & Update Quotas"}
+        </button>
+
+        <p className="mt-2 text-sm text-green-800">
+          {round.is_complete
+            ? "This round is closed. Quotas have already been updated."
+            : "Use this once after the round is complete."}
+        </p>
+      </div>
+    )}
     <div className="mt-8 overflow-x-auto rounded border">
       <table className="min-w-max border-collapse">
         <thead>
