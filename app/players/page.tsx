@@ -464,7 +464,7 @@ export default function PlayersPage() {
               <input
                 type="number"
                 min="0"
-                step="1"
+                step="0.01"
                 value={quota}
                 onChange={(event) =>
                   setQuota(event.target.value)
@@ -561,7 +561,7 @@ export default function PlayersPage() {
                         <input
                           type="number"
                           min="0"
-                          step="1"
+                          step="0.01"
                           value={editQuota}
                           onChange={(event) =>
                             setEditQuota(event.target.value)
@@ -604,7 +604,7 @@ export default function PlayersPage() {
 
                         <div className="text-sm text-gray-500">
                           Current Quota:{" "}
-                          <strong>{player.quota}</strong>
+                          <strong>{player.quota.toFixed(2)}</strong>
                         </div>
                       </div>
 

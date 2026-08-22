@@ -93,14 +93,25 @@ export default function RoundPage({ params }: { params: Promise<{ id: string }> 
 
   function getPoints(playerId:string) { return round ? calculatePlayerQuotaPoints(scores,playerId,pars,round.holes,quotaPoints) : 0; }
   function getTotal(playerId:string) { if(!round)return 0; let t=0; for(let h=1;h<=round.holes;h++){const v=scores[`${playerId}-${h}`]; if(typeof v==="number")t+=v;} return t; }
-  function newQuota(q:number,p:number){const d=p-q;if(!d)return q;const a=Math.ceil(Math.abs(d)/2);return d>0?q+a:Math.max(0,q-a);}
+  function getPlayingQuota(q: number) {
+    return Math.round(q);
+  }
+
+  function newQuota(q: number, p: number) {
+    const exact = (q + p) / 2;
+    return Math.max(0, Math.round((exact + Number.EPSILON) * 100) / 100);
+  }
+
+  function formatQuota(q: number) {
+    return q.toFixed(2);
+  }
 
   async function finishRound() {
     if (!isAdmin) return;
     if (!window.confirm("Finish this round and update all player quotas? This should only be done once.")) return;
     setMessage("Updating quotas...");
     for (const p of players) {
-      const { error } = await supabase.from("players").update({ quota:newQuota(p.quota,getPoints(p.id)) }).eq("id",p.id);
+      const { error } = await supabase.from("players").update({ quota: newQuota(p.quota, getPoints(p.id)) }).eq("id", p.id);
       if (error) { setError(error.message); setMessage(""); return; }
     }
     setPlayers(ps=>ps.map(p=>({...p,quota:newQuota(p.quota,getPoints(p.id))})));
@@ -211,6 +222,57 @@ export default function RoundPage({ params }: { params: Promise<{ id: string }> 
         </tfoot>
       </table>
     </div>
-    <div className="mt-8"><h2 className="mb-4 text-2xl font-bold">Quota Results</h2><div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">{players.map(p=>{const pts=getPoints(p.id), result=pts-p.quota;return <div key={p.id} className="rounded border p-4"><h3 className="text-xl font-bold">{p.name}</h3><div className="mt-3">Quota: <strong>{p.quota}</strong></div><div>Points: <strong>{pts}</strong></div><div>Result: <strong>{result>0?"+":""}{result}</strong></div><div className="mt-3 border-t pt-3">Next Quota: <strong>{newQuota(p.quota,pts)}</strong></div></div>})}</div></div>
+    <div className="mt-8">
+      <h2 className="mb-4 text-2xl font-bold">
+        Quota Results
+      </h2>
+
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        {players.map((p) => {
+          const pts = getPoints(p.id);
+          const playingQuota = getPlayingQuota(p.quota);
+          const result = pts - playingQuota;
+          const nextQuota = newQuota(p.quota, pts);
+
+          return (
+            <div
+              key={p.id}
+              className="rounded border p-4"
+            >
+              <h3 className="text-xl font-bold">
+                {p.name}
+              </h3>
+
+              <div className="mt-3">
+                Overall Quota:{" "}
+                <strong>{formatQuota(p.quota)}</strong>
+              </div>
+
+              <div>
+                Playing Quota:{" "}
+                <strong>{playingQuota}</strong>
+              </div>
+
+              <div>
+                Points: <strong>{pts}</strong>
+              </div>
+
+              <div>
+                Result:{" "}
+                <strong>
+                  {result > 0 ? "+" : ""}
+                  {result}
+                </strong>
+              </div>
+
+              <div className="mt-3 border-t pt-3">
+                Next Overall Quota:{" "}
+                <strong>{formatQuota(nextQuota)}</strong>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   </main>;
 }
