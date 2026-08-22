@@ -24,3 +24,112 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+/* -------------------------------------------------
+   DARK MODE
+   Uses the phone/computer system appearance setting
+-------------------------------------------------- */
+
+@media (prefers-color-scheme: dark) {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    background: #111827;
+    color: #f9fafb;
+  }
+
+  main {
+    color: #f9fafb;
+  }
+
+  /* White cards / sections */
+  .bg-white {
+    background-color: #1f2937 !important;
+  }
+
+  .bg-gray-50 {
+    background-color: #1f2937 !important;
+  }
+
+  .bg-gray-100 {
+    background-color: #111827 !important;
+  }
+
+  /* Text that becomes difficult to see in dark mode */
+  .text-gray-900 {
+    color: #f9fafb !important;
+  }
+
+  .text-gray-800 {
+    color: #f3f4f6 !important;
+  }
+
+  .text-gray-700 {
+    color: #e5e7eb !important;
+  }
+
+  .text-gray-600 {
+    color: #d1d5db !important;
+  }
+
+  .text-gray-500 {
+    color: #9ca3af !important;
+  }
+
+  /* Borders */
+  .border,
+  .border-gray-200,
+  .border-gray-300 {
+    border-color: #4b5563 !important;
+  }
+
+  /* Inputs / dropdowns */
+  input,
+  select,
+  textarea {
+    background-color: #111827 !important;
+    color: #f9fafb !important;
+    border-color: #4b5563 !important;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: #9ca3af !important;
+  }
+
+  select option {
+    background-color: #111827;
+    color: #f9fafb;
+  }
+
+  /* Scorecard tables */
+  table {
+    color: #f9fafb;
+  }
+
+  th {
+    background-color: #1f2937 !important;
+    color: #f9fafb !important;
+  }
+
+  td {
+    color: #f9fafb;
+    border-color: #4b5563 !important;
+  }
+
+  /* Sticky scorecard hole column */
+  td.sticky,
+  th.sticky {
+    background-color: #1f2937 !important;
+    color: #f9fafb !important;
+  }
+
+  /* Player names */
+  h1,
+  h2,
+  h3,
+  strong {
+    color: inherit;
+  }
+}
