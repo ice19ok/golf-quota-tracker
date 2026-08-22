@@ -59,6 +59,21 @@ export default function RoundPage({ params }: { params: Promise<{ id: string }> 
   const pars = Object.fromEntries(parsArray.map((p,i)=>[i+1,p])) as Record<number,number>;
   const totalPar = parsArray.reduce((a,b)=>a+b,0);
 
+  /*
+   * SCORECARD PLAYER ORDER
+   *
+   * The player linked to the logged-in account
+   * is shown first. Everyone else is alphabetical.
+   */
+  const scorecardPlayers = [...players].sort((a, b) => {
+    if (currentPlayerId) {
+      if (a.id === currentPlayerId && b.id !== currentPlayerId) return -1;
+      if (b.id === currentPlayerId && a.id !== currentPlayerId) return 1;
+    }
+
+    return a.name.localeCompare(b.name);
+  });
+
   function canEdit(playerId: string) { return isAdmin || currentPlayerId === playerId; }
 
   async function updateScore(playerId: string, hole: number, raw: string) {
@@ -100,7 +115,102 @@ export default function RoundPage({ params }: { params: Promise<{ id: string }> 
     <div className="flex flex-wrap justify-between gap-4"><div><h1 className="text-3xl font-bold">{round.name}</h1><p className="text-gray-600">{round.course} • White Tees • {round.holes} Holes • Par {totalPar}</p><p className="mt-2 text-sm text-gray-500">{isAdmin ? "Admin: you can edit every player." : currentPlayerId ? "You can see all scores and edit only your own." : "Your login is not linked to a player yet, so scores are view-only."}</p></div><div>{message}</div></div>
     {error && <div className="mt-4 rounded border border-red-300 bg-red-50 p-3 text-red-700">{error}</div>}
     {isAdmin && <div className="mt-6 rounded border border-green-300 bg-green-50 p-4"><button type="button" onClick={finishRound} className="rounded bg-green-600 px-5 py-3 font-semibold text-white">Finish Round & Update Quotas</button><p className="mt-2 text-sm text-green-800">Use this once after the round is complete.</p></div>}
-    <div className="mt-8 overflow-x-auto rounded border"><table className="min-w-max border-collapse"><thead><tr className="bg-gray-100"><th className="sticky left-0 border bg-gray-100 p-3">Hole</th><th className="border p-3">Par</th>{players.map(p=><th key={p.id} className="min-w-[110px] border p-3">{p.name}</th>)}</tr></thead><tbody>{Array.from({length:round.holes},(_,i)=>i+1).map(h=><tr key={h}><td className="sticky left-0 border bg-white p-3 font-bold">{h}</td><td className="border p-2 text-center font-bold">{pars[h]}</td>{players.map(p=>{const key=`${p.id}-${h}`;const editable=canEdit(p.id);return <td key={p.id} className="border p-2"><input type="number" min="1" max="15" value={scores[key]??""} disabled={!editable} onChange={e=>updateScore(p.id,h,e.target.value)} className={`w-20 rounded border p-2 text-center ${editable?"bg-white":"bg-gray-100 text-gray-500"}`}/></td>})}</tr>)}</tbody><tfoot><tr className="bg-gray-100"><td className="border p-3 font-bold">Total</td><td className="border p-3 font-bold">{totalPar}</td>{players.map(p=><td key={p.id} className="border p-3 text-center font-bold">{getTotal(p.id)}</td>)}</tr></tfoot></table></div>
+    <div className="mt-8 overflow-x-auto rounded border">
+      <table className="min-w-max border-collapse">
+        <thead>
+          <tr className="bg-gray-100">
+            <th className="sticky left-0 z-30 w-16 min-w-16 border bg-gray-100 p-3 text-center">
+              Hole
+            </th>
+
+            <th className="sticky left-16 z-30 w-16 min-w-16 border bg-gray-100 p-3 text-center shadow-[2px_0_4px_rgba(0,0,0,0.12)]">
+              Par
+            </th>
+
+            {scorecardPlayers.map((p) => (
+              <th
+                key={p.id}
+                className="min-w-[110px] border p-3"
+              >
+                {p.name}
+                {currentPlayerId === p.id && (
+                  <div className="mt-1 text-xs font-normal text-blue-600">
+                    You
+                  </div>
+                )}
+              </th>
+            ))}
+          </tr>
+        </thead>
+
+        <tbody>
+          {Array.from(
+            { length: round.holes },
+            (_, i) => i + 1
+          ).map((h) => (
+            <tr key={h}>
+              <td className="sticky left-0 z-20 w-16 min-w-16 border bg-white p-3 text-center font-bold">
+                {h}
+              </td>
+
+              <td className="sticky left-16 z-20 w-16 min-w-16 border bg-white p-2 text-center font-bold shadow-[2px_0_4px_rgba(0,0,0,0.12)]">
+                {pars[h]}
+              </td>
+
+              {scorecardPlayers.map((p) => {
+                const key = `${p.id}-${h}`;
+                const editable = canEdit(p.id);
+
+                return (
+                  <td key={p.id} className="border p-2">
+                    <input
+                      type="number"
+                      min="1"
+                      max="15"
+                      value={scores[key] ?? ""}
+                      disabled={!editable}
+                      onChange={(e) =>
+                        updateScore(
+                          p.id,
+                          h,
+                          e.target.value
+                        )
+                      }
+                      className={`w-20 rounded border p-2 text-center ${
+                        editable
+                          ? "bg-white"
+                          : "bg-gray-100 text-gray-500"
+                      }`}
+                    />
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+
+        <tfoot>
+          <tr className="bg-gray-100">
+            <td className="sticky left-0 z-20 w-16 min-w-16 border bg-gray-100 p-3 text-center font-bold">
+              Total
+            </td>
+
+            <td className="sticky left-16 z-20 w-16 min-w-16 border bg-gray-100 p-3 text-center font-bold shadow-[2px_0_4px_rgba(0,0,0,0.12)]">
+              {totalPar}
+            </td>
+
+            {scorecardPlayers.map((p) => (
+              <td
+                key={p.id}
+                className="border p-3 text-center font-bold"
+              >
+                {getTotal(p.id)}
+              </td>
+            ))}
+          </tr>
+        </tfoot>
+      </table>
+    </div>
     <div className="mt-8"><h2 className="mb-4 text-2xl font-bold">Quota Results</h2><div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">{players.map(p=>{const pts=getPoints(p.id), result=pts-p.quota;return <div key={p.id} className="rounded border p-4"><h3 className="text-xl font-bold">{p.name}</h3><div className="mt-3">Quota: <strong>{p.quota}</strong></div><div>Points: <strong>{pts}</strong></div><div>Result: <strong>{result>0?"+":""}{result}</strong></div><div className="mt-3 border-t pt-3">Next Quota: <strong>{newQuota(p.quota,pts)}</strong></div></div>})}</div></div>
   </main>;
 }
