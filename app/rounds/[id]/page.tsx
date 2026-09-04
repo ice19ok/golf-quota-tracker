@@ -107,6 +107,82 @@ export default function RoundPage({ params }: { params: Promise<{ id: string }> 
     return q.toFixed(2);
   }
 
+  const leaderboard = players
+    .map((player) => {
+      const points = getPoints(player.id);
+      const playingQuota = getPlayingQuota(player.quota);
+      const result = points - playingQuota;
+
+      return {
+        ...player,
+        points,
+        playingQuota,
+        result,
+        totalScore: getTotal(player.id),
+      };
+    })
+    .sort((a, b) => {
+      if (b.result !== a.result) {
+        return b.result - a.result;
+      }
+
+      if (b.points !== a.points) {
+        return b.points - a.points;
+      }
+
+      if (a.totalScore !== b.totalScore) {
+        return a.totalScore - b.totalScore;
+      }
+
+      return a.name.localeCompare(b.name);
+    });
+
+  const entryFee = 10;
+  const totalPot = players.length * entryFee;
+  const thirdPlacePayout = players.length >= 3 ? 10 : 0;
+  const remainingPot = Math.max(0, totalPot - thirdPlacePayout);
+  function roundToNearestFive(amount: number) {
+    return Math.round(amount / 5) * 5;
+  }
+
+  const firstPlacePayout =
+    players.length >= 3
+      ? roundToNearestFive(remainingPot * 0.7)
+      : 0;
+
+  /*
+   * Give second place the remainder after 1st and 3rd.
+   * This keeps the full pot accounted for while 1st is
+   * rounded to the nearest $5.
+   */
+  const secondPlacePayout =
+    players.length >= 3
+      ? totalPot - thirdPlacePayout - firstPlacePayout
+      : 0;
+
+  const hasPayoutTie =
+    players.length >= 3 &&
+    (
+      leaderboard[0]?.result === leaderboard[1]?.result ||
+      leaderboard[1]?.result === leaderboard[2]?.result ||
+      (
+        leaderboard.length > 3 &&
+        leaderboard[2]?.result === leaderboard[3]?.result
+      )
+    );
+
+  function getPayout(index: number) {
+    if (players.length < 3 || hasPayoutTie) {
+      return 0;
+    }
+
+    if (index === 0) return firstPlacePayout;
+    if (index === 1) return secondPlacePayout;
+    if (index === 2) return thirdPlacePayout;
+
+    return 0;
+  }
+
   async function finishRound() {
     if (!isAdmin || !round || round.is_complete || finishingRound) {
       return;
@@ -282,6 +358,120 @@ export default function RoundPage({ params }: { params: Promise<{ id: string }> 
         </p>
       </div>
     )}
+    <section className="mt-8 rounded-lg border bg-white p-5 shadow-sm">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-2xl font-bold">
+            Leaderboard
+          </h2>
+
+          <p className="mt-1 text-sm text-gray-600">
+            Ranked by quota result: Points minus Playing Quota.
+          </p>
+        </div>
+
+        <div className="rounded bg-gray-100 px-4 py-3 text-sm">
+          <div>
+            Entry Fee: <strong>${entryFee}</strong> per player
+          </div>
+          <div>
+            Total Pot: <strong>${totalPot.toFixed(2)}</strong>
+          </div>
+        </div>
+      </div>
+
+      {players.length >= 3 && (
+        <div className="mt-4 rounded border bg-gray-50 p-4">
+          <div className="font-semibold">
+            Payout
+          </div>
+
+          <div className="mt-2 grid gap-2 sm:grid-cols-3">
+            <div>
+              1st: <strong>${firstPlacePayout.toFixed(2)}</strong>
+            </div>
+            <div>
+              2nd: <strong>${secondPlacePayout.toFixed(2)}</strong>
+            </div>
+            <div>
+              3rd: <strong>${thirdPlacePayout.toFixed(2)}</strong>
+            </div>
+          </div>
+
+          {hasPayoutTie && (
+            <div className="mt-3 rounded border border-yellow-300 bg-yellow-50 p-3 text-sm font-medium text-yellow-800">
+              There is a tie affecting the top three. Payouts are shown as pending until the tie is resolved.
+            </div>
+          )}
+        </div>
+      )}
+
+      {players.length < 3 && (
+        <div className="mt-4 rounded border border-yellow-300 bg-yellow-50 p-3 text-sm text-yellow-800">
+          At least 3 players are required for the top-three payout.
+        </div>
+      )}
+
+      <div className="mt-5 overflow-x-auto">
+        <table className="min-w-full border-collapse">
+          <thead>
+            <tr className="bg-gray-100">
+              <th className="border p-3 text-left">Place</th>
+              <th className="border p-3 text-left">Player</th>
+              <th className="border p-3 text-center">Playing Quota</th>
+              <th className="border p-3 text-center">Points</th>
+              <th className="border p-3 text-center">Result</th>
+              <th className="border p-3 text-center">Winnings</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {leaderboard.map((player, index) => {
+              const payout = getPayout(index);
+
+              return (
+                <tr key={player.id}>
+                  <td className="border p-3 font-bold">
+                    {index + 1}
+                  </td>
+
+                  <td className="border p-3 font-semibold">
+                    {player.name}
+                    {currentPlayerId === player.id && (
+                      <span className="ml-2 text-xs font-normal text-blue-600">
+                        You
+                      </span>
+                    )}
+                  </td>
+
+                  <td className="border p-3 text-center">
+                    {player.playingQuota}
+                  </td>
+
+                  <td className="border p-3 text-center">
+                    {player.points}
+                  </td>
+
+                  <td className="border p-3 text-center font-bold">
+                    {player.result > 0 ? "+" : ""}
+                    {player.result}
+                  </td>
+
+                  <td className="border p-3 text-center font-bold">
+                    {hasPayoutTie && index < 3
+                      ? "Pending"
+                      : payout > 0
+                      ? `$${payout.toFixed(2)}`
+                      : "—"}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <div className="mt-8 overflow-x-auto rounded border">
       <table className="min-w-max border-collapse">
         <thead>
