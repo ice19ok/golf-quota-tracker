@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { DEFAULT_QUOTA_POINTS, loadQuotaPoints, calculatePlayerQuotaPoints, type QuotaPoints } from "@/lib/quota";
 
 type Player = { id: string; name: string; quota: number };
-type Round = { id: string; name: string; course: string; holes: number; is_complete: boolean; completed_at?: string | null };
+type Round = { id: string; name: string; course: string; holes: number; is_complete: boolean; completed_at?: string | null; rollover_in: number; rollover_out: number };
 type ScoreRow = { id?: string; round_id: string; player_id: string; hole: number; score: number };
 
 const COURSES: Record<string, number[]> = {
@@ -38,14 +38,14 @@ export default function RoundPage({ params }: { params: Promise<{ id: string }> 
       setCurrentPlayerId(profileRes.data?.player_id ? String(profileRes.data.player_id) : null);
       setQuotaPoints(loadQuotaPoints());
       const [roundRes, rpRes, playerRes, scoreRes] = await Promise.all([
-        supabase.from("rounds").select("id,name,course,holes,is_complete,completed_at").eq("id", id).single(),
+        supabase.from("rounds").select("id,name,course,holes,is_complete,completed_at,rollover_in,rollover_out").eq("id", id).single(),
         supabase.from("round_players").select("player_id").eq("round_id", id),
         supabase.from("players").select("id,name,quota").order("name"),
         supabase.from("scores").select("id,round_id,player_id,hole,score").eq("round_id", id),
       ]);
       const firstError = roundRes.error || rpRes.error || playerRes.error || scoreRes.error;
       if (firstError) { setError(firstError.message); setLoading(false); return; }
-      setRound({ ...roundRes.data, id:String(roundRes.data.id), holes:Number(roundRes.data.holes), is_complete:Boolean(roundRes.data.is_complete) });
+      setRound({ ...roundRes.data, id:String(roundRes.data.id), holes:Number(roundRes.data.holes), is_complete:Boolean(roundRes.data.is_complete), rollover_in:Number(roundRes.data.rollover_in || 0), rollover_out:Number(roundRes.data.rollover_out || 0) });
       const ids = new Set((rpRes.data || []).map(x=>String(x.player_id)));
       setPlayers((playerRes.data || []).filter(p=>ids.has(String(p.id))).map(p=>({id:String(p.id),name:p.name,quota:Number(p.quota)})));
       const map: Record<string, number | ""> = {};
@@ -119,9 +119,18 @@ export default function RoundPage({ params }: { params: Promise<{ id: string }> 
         playingQuota,
         result,
         totalScore: getTotal(player.id),
+        eligibleForPayout: result >= 0,
       };
     })
     .sort((a, b) => {
+      /*
+       * Players who hit or beat quota are always ranked ahead
+       * of players who missed quota for payout purposes.
+       */
+      if (a.eligibleForPayout !== b.eligibleForPayout) {
+        return a.eligibleForPayout ? -1 : 1;
+      }
+
       if (b.result !== a.result) {
         return b.result - a.result;
       }
@@ -137,48 +146,71 @@ export default function RoundPage({ params }: { params: Promise<{ id: string }> 
       return a.name.localeCompare(b.name);
     });
 
+  const eligiblePlayers = leaderboard.filter(
+    (player) => player.eligibleForPayout
+  );
+
   const entryFee = 10;
-  const totalPot = players.length * entryFee;
-  const thirdPlacePayout = players.length >= 3 ? 10 : 0;
-  const remainingPot = Math.max(0, totalPot - thirdPlacePayout);
+  const newEntryMoney = players.length * entryFee;
+  const rolloverIn = round?.rollover_in ?? 0;
+  const totalPot = newEntryMoney + rolloverIn;
+
   function roundToNearestFive(amount: number) {
     return Math.round(amount / 5) * 5;
   }
 
-  const firstPlacePayout =
-    players.length >= 3
-      ? roundToNearestFive(remainingPot * 0.7)
-      : 0;
+  const eligibleCount = eligiblePlayers.length;
+
+  let firstPlacePayout = 0;
+  let secondPlacePayout = 0;
+  let thirdPlacePayout = 0;
+  let rolloverOut = 0;
+
+  if (eligibleCount >= 3) {
+    thirdPlacePayout = 10;
+    const remainingAfterThird = Math.max(0, totalPot - thirdPlacePayout);
+    firstPlacePayout = roundToNearestFive(remainingAfterThird * 0.7);
+    secondPlacePayout =
+      totalPot - thirdPlacePayout - firstPlacePayout;
+  } else if (eligibleCount === 2) {
+    firstPlacePayout = roundToNearestFive(totalPot * 0.7);
+    secondPlacePayout = totalPot - firstPlacePayout;
+  } else if (eligibleCount === 1) {
+    firstPlacePayout = totalPot;
+  } else {
+    rolloverOut = totalPot;
+  }
 
   /*
-   * Give second place the remainder after 1st and 3rd.
-   * This keeps the full pot accounted for while 1st is
-   * rounded to the nearest $5.
+   * Keep payouts pending whenever a tie affects a paid position.
+   * This avoids assigning prize money arbitrarily.
    */
-  const secondPlacePayout =
-    players.length >= 3
-      ? totalPot - thirdPlacePayout - firstPlacePayout
-      : 0;
-
   const hasPayoutTie =
-    players.length >= 3 &&
+    eligibleCount >= 2 &&
     (
-      leaderboard[0]?.result === leaderboard[1]?.result ||
-      leaderboard[1]?.result === leaderboard[2]?.result ||
+      eligiblePlayers[0]?.result === eligiblePlayers[1]?.result ||
       (
-        leaderboard.length > 3 &&
-        leaderboard[2]?.result === leaderboard[3]?.result
+        eligibleCount >= 3 &&
+        eligiblePlayers[1]?.result === eligiblePlayers[2]?.result
+      ) ||
+      (
+        eligibleCount > 3 &&
+        eligiblePlayers[2]?.result === eligiblePlayers[3]?.result
       )
     );
 
-  function getPayout(index: number) {
-    if (players.length < 3 || hasPayoutTie) {
+  function getPayout(playerId: string) {
+    if (hasPayoutTie || eligibleCount === 0) {
       return 0;
     }
 
-    if (index === 0) return firstPlacePayout;
-    if (index === 1) return secondPlacePayout;
-    if (index === 2) return thirdPlacePayout;
+    const eligibleIndex = eligiblePlayers.findIndex(
+      (player) => player.id === playerId
+    );
+
+    if (eligibleIndex === 0) return firstPlacePayout;
+    if (eligibleIndex === 1) return secondPlacePayout;
+    if (eligibleIndex === 2) return thirdPlacePayout;
 
     return 0;
   }
@@ -217,6 +249,7 @@ export default function RoundPage({ params }: { params: Promise<{ id: string }> 
       .update({
         is_complete: true,
         completed_at: completedAt,
+        rollover_out: rolloverOut,
       })
       .eq("id", round.id)
       .eq("is_complete", false)
@@ -268,6 +301,7 @@ export default function RoundPage({ params }: { params: Promise<{ id: string }> 
           .update({
             is_complete: false,
             completed_at: null,
+            rollover_out: 0,
           })
           .eq("id", round.id);
 
@@ -298,11 +332,16 @@ export default function RoundPage({ params }: { params: Promise<{ id: string }> 
             ...current,
             is_complete: true,
             completed_at: completedAt,
+            rollover_out: rolloverOut,
           }
         : current
     );
 
-    setMessage("Round completed and quotas updated once.");
+    setMessage(
+      eligibleCount === 0
+        ? `Round completed. $${rolloverOut.toFixed(2)} rolls over to the next round.`
+        : "Round completed and quotas updated once."
+    );
     setFinishingRound(false);
   }
 
@@ -366,7 +405,7 @@ export default function RoundPage({ params }: { params: Promise<{ id: string }> 
           </h2>
 
           <p className="mt-1 text-sm text-gray-600">
-            Ranked by quota result: Points minus Playing Quota.
+            Only players who hit or beat their Playing Quota (Result 0 or higher) are eligible for the top three.
           </p>
         </div>
 
@@ -375,17 +414,25 @@ export default function RoundPage({ params }: { params: Promise<{ id: string }> 
             Entry Fee: <strong>${entryFee}</strong> per player
           </div>
           <div>
+            New Entry Money: <strong>${newEntryMoney.toFixed(2)}</strong>
+          </div>
+          {rolloverIn > 0 && (
+            <div>
+              Rollover Added: <strong>${rolloverIn.toFixed(2)}</strong>
+            </div>
+          )}
+          <div>
             Total Pot: <strong>${totalPot.toFixed(2)}</strong>
           </div>
         </div>
       </div>
 
-      {players.length >= 3 && (
-        <div className="mt-4 rounded border bg-gray-50 p-4">
-          <div className="font-semibold">
-            Payout
-          </div>
+      <div className="mt-4 rounded border bg-gray-50 p-4">
+        <div className="font-semibold">
+          Payout
+        </div>
 
+        {eligibleCount >= 3 && (
           <div className="mt-2 grid gap-2 sm:grid-cols-3">
             <div>
               1st: <strong>${firstPlacePayout.toFixed(2)}</strong>
@@ -397,20 +444,37 @@ export default function RoundPage({ params }: { params: Promise<{ id: string }> 
               3rd: <strong>${thirdPlacePayout.toFixed(2)}</strong>
             </div>
           </div>
+        )}
 
-          {hasPayoutTie && (
-            <div className="mt-3 rounded border border-yellow-300 bg-yellow-50 p-3 text-sm font-medium text-yellow-800">
-              There is a tie affecting the top three. Payouts are shown as pending until the tie is resolved.
+        {eligibleCount === 2 && (
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            <div>
+              1st (70%): <strong>${firstPlacePayout.toFixed(2)}</strong>
             </div>
-          )}
-        </div>
-      )}
+            <div>
+              2nd (30%): <strong>${secondPlacePayout.toFixed(2)}</strong>
+            </div>
+          </div>
+        )}
 
-      {players.length < 3 && (
-        <div className="mt-4 rounded border border-yellow-300 bg-yellow-50 p-3 text-sm text-yellow-800">
-          At least 3 players are required for the top-three payout.
-        </div>
-      )}
+        {eligibleCount === 1 && (
+          <div className="mt-2">
+            1st receives the full pot: <strong>${firstPlacePayout.toFixed(2)}</strong>
+          </div>
+        )}
+
+        {eligibleCount === 0 && (
+          <div className="mt-2 rounded border border-yellow-300 bg-yellow-50 p-3 font-medium text-yellow-800">
+            No player hit quota. The full <strong>${rolloverOut.toFixed(2)}</strong> pot rolls to the next round.
+          </div>
+        )}
+
+        {hasPayoutTie && (
+          <div className="mt-3 rounded border border-yellow-300 bg-yellow-50 p-3 text-sm font-medium text-yellow-800">
+            There is a tie affecting a paid position. Payouts are pending until the tie is resolved.
+          </div>
+        )}
+      </div>
 
       <div className="mt-5 overflow-x-auto">
         <table className="min-w-full border-collapse">
@@ -427,12 +491,14 @@ export default function RoundPage({ params }: { params: Promise<{ id: string }> 
 
           <tbody>
             {leaderboard.map((player, index) => {
-              const payout = getPayout(index);
+              const payout = getPayout(player.id);
 
               return (
                 <tr key={player.id}>
                   <td className="border p-3 font-bold">
-                    {index + 1}
+                    {player.eligibleForPayout
+                      ? eligiblePlayers.findIndex((p) => p.id === player.id) + 1
+                      : "—"}
                   </td>
 
                   <td className="border p-3 font-semibold">
@@ -458,7 +524,10 @@ export default function RoundPage({ params }: { params: Promise<{ id: string }> 
                   </td>
 
                   <td className="border p-3 text-center font-bold">
-                    {hasPayoutTie && index < 3
+                    {hasPayoutTie &&
+                    player.eligibleForPayout &&
+                    eligiblePlayers.findIndex((p) => p.id === player.id) <
+                      Math.min(3, eligibleCount)
                       ? "Pending"
                       : payout > 0
                       ? `$${payout.toFixed(2)}`
@@ -622,3 +691,4 @@ export default function RoundPage({ params }: { params: Promise<{ id: string }> 
     </div>
   </main>;
 }
+

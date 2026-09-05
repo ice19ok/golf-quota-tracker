@@ -24,17 +24,33 @@ export default function NewRoundPage() {
   const [creating, setCreating] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [error, setError] = useState("");
+  const [availableRollover, setAvailableRollover] = useState(0);
 
   useEffect(() => {
     async function load() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { router.replace("/login"); return; }
-      const [{ data: profile, error: profileError }, { data: playerData, error: playerError }] = await Promise.all([
+      const [
+        { data: profile, error: profileError },
+        { data: playerData, error: playerError },
+        { data: rolloverData, error: rolloverError },
+      ] = await Promise.all([
         supabase.from("profiles").select("role").eq("id", user.id).single(),
         supabase.from("players").select("id,name,quota").order("name"),
+        supabase
+          .from("rounds")
+          .select("id,rollover_out")
+          .eq("is_complete", true)
+          .eq("rollover_consumed", false)
+          .gt("rollover_out", 0)
+          .order("completed_at", { ascending: true })
+          .limit(1)
+          .maybeSingle(),
       ]);
       if (profileError) setError(profileError.message);
       if (playerError) setError(playerError.message);
+      if (rolloverError) setError(rolloverError.message);
+      setAvailableRollover(Number(rolloverData?.rollover_out || 0));
       setIsAdmin(profile?.role === "admin");
       setPlayers((playerData || []).map(p => ({ id: String(p.id), name: p.name, quota: Number(p.quota) })));
       setLoading(false);
@@ -52,7 +68,41 @@ export default function NewRoundPage() {
     if (!roundName.trim()) { setError("Please enter a round name."); return; }
     if (!selectedPlayers.length) { setError("Please select at least one player."); return; }
     setCreating(true);
+    let rolloverSourceId: string | null = null;
+    let claimedRollover = 0;
+
     try {
+      const { data: rolloverSource, error: rolloverLookupError } =
+        await supabase
+          .from("rounds")
+          .select("id,rollover_out")
+          .eq("is_complete", true)
+          .eq("rollover_consumed", false)
+          .gt("rollover_out", 0)
+          .order("completed_at", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+
+      if (rolloverLookupError) throw rolloverLookupError;
+
+      if (rolloverSource) {
+        const { data: claimedSource, error: claimError } =
+          await supabase
+            .from("rounds")
+            .update({ rollover_consumed: true })
+            .eq("id", rolloverSource.id)
+            .eq("rollover_consumed", false)
+            .select("id,rollover_out")
+            .maybeSingle();
+
+        if (claimError) throw claimError;
+
+        if (claimedSource) {
+          rolloverSourceId = String(claimedSource.id);
+          claimedRollover = Number(claimedSource.rollover_out || 0);
+        }
+      }
+
       const { data: newRound, error: roundError } = await supabase
         .from("rounds")
         .insert({
@@ -60,6 +110,8 @@ export default function NewRoundPage() {
           course,
           holes: Number(holes),
           pars: (COURSES[course] || []).slice(0, Number(holes)),
+          rollover_in: claimedRollover,
+          rollover_out: 0,
         })
         .select("id")
         .single();
@@ -69,10 +121,25 @@ export default function NewRoundPage() {
       );
       if (rpError) {
         await supabase.from("rounds").delete().eq("id", newRound.id);
+
+        if (rolloverSourceId) {
+          await supabase
+            .from("rounds")
+            .update({ rollover_consumed: false })
+            .eq("id", rolloverSourceId);
+        }
+
         throw rpError;
       }
       router.push(`/rounds/${newRound.id}`);
     } catch (e: any) {
+      if (rolloverSourceId) {
+        await supabase
+          .from("rounds")
+          .update({ rollover_consumed: false })
+          .eq("id", rolloverSourceId);
+      }
+
       console.error("Could not create round:", e);
 
       const message =
@@ -103,6 +170,12 @@ export default function NewRoundPage() {
       <Link href="/players" className="rounded bg-purple-600 px-4 py-2 text-white">Players</Link>
     </div>
     <h1 className="text-3xl font-bold">Create New Round</h1>
+
+    {availableRollover > 0 && (
+      <div className="mt-4 rounded border border-green-300 bg-green-50 p-4 font-semibold text-green-800">
+        Rollover available for this round: ${availableRollover.toFixed(2)}
+      </div>
+    )}
     {!isAdmin && <div className="mt-6 rounded border border-yellow-300 bg-yellow-50 p-4 text-yellow-800">Only an administrator can create rounds.</div>}
     {error && <div className="mt-6 rounded border border-red-300 bg-red-50 p-4 text-red-700">{error}</div>}
     <div className="mt-6 space-y-6">
