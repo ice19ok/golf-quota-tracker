@@ -66,6 +66,7 @@ export default function PlayersPage() {
         supabase
           .from("players")
           .select("id, name, quota")
+          .eq("is_guest", false)
           .order("name"),
       ]);
 
