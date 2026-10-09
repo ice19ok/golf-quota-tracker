@@ -348,25 +348,6 @@ export default function RoundPage({ params }: { params: Promise<{ id: string }> 
   if (loading) return <main className="p-8">Loading scorecard...</main>;
   if (!round) return <main className="p-8"><h1 className="text-2xl font-bold">Round Not Found</h1><p className="mt-3 text-red-600">{error}</p></main>;
 
-  if (round.is_complete && !isAdmin) {
-    return (
-      <main className="mx-auto max-w-3xl p-6 md:p-8">
-        <div className="rounded-lg border bg-white p-6 shadow-sm">
-          <h1 className="text-2xl font-bold">Round Completed</h1>
-          <p className="mt-3 text-gray-600">
-            This round is closed and can no longer be reopened.
-          </p>
-          <Link
-            href="/rounds"
-            className="mt-6 inline-block rounded bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700"
-          >
-            Back to Rounds
-          </Link>
-        </div>
-      </main>
-    );
-  }
-
   return <main className="mx-auto max-w-full p-4 md:p-8">
     <div className="mb-6 flex flex-wrap gap-3"><Link href="/" className="rounded bg-gray-500 px-4 py-2 text-white">Home</Link><Link href="/rounds" className="rounded bg-blue-600 px-4 py-2 text-white">Rounds</Link><Link href="/players" className="rounded bg-purple-600 px-4 py-2 text-white">Players</Link></div>
     <div className="flex flex-wrap justify-between gap-4"><div><h1 className="text-3xl font-bold">{round.name}</h1><p className="text-gray-600">{round.course} • White Tees • {round.holes} Holes • Par {totalPar}</p><p className="mt-2 text-sm text-gray-500">{isAdmin ? "Admin: you can edit every player." : currentPlayerId ? "You can see all scores and edit only your own." : "Your login is not linked to a player yet, so scores are view-only."}</p></div><div>{message}</div></div>

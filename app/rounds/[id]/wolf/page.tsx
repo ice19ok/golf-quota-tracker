@@ -537,29 +537,6 @@ export default function WolfRoundPage({
     );
   }
 
-  if (round.is_complete && !isAdmin) {
-    return (
-      <main className="mx-auto max-w-3xl p-8">
-        <div className="rounded-lg border bg-white p-6 shadow-sm">
-          <h1 className="text-2xl font-bold">
-            Wolf Round Completed
-          </h1>
-
-          <p className="mt-3 text-gray-600">
-            This round is closed and cannot be reopened.
-          </p>
-
-          <Link
-            href="/rounds"
-            className="mt-6 inline-block rounded bg-blue-600 px-4 py-2 text-white"
-          >
-            Back to Rounds
-          </Link>
-        </div>
-      </main>
-    );
-  }
-
   return (
     <main className="mx-auto max-w-6xl p-6 md:p-8">
       <div className="flex flex-wrap gap-3">
