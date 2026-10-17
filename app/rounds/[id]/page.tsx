@@ -10,8 +10,18 @@ type Round = { id: string; name: string; course: string; holes: number; is_compl
 type ScoreRow = { id?: string; round_id: string; player_id: string; hole: number; score: number };
 
 const COURSES: Record<string, number[]> = {
-  "KickingBird Golf Club": [4,4,3,5,4,3,4,4,4, 4,3,5,4,3,5,3,4,4],
-  "The Golf Club of Edmond": [4,5,3,4,4,4,3,4,5, 3,4,4,4,3,5,4,3,5],
+  "KickingBird Golf Club": [4,4,3,5,4,3,4,4,4,4,3,5,4,3,5,3,4,4],
+  "The Golf Club of Edmond": [4,5,3,4,4,4,3,4,5,3,4,4,4,3,5,4,3,5],
+
+  "Lincoln Park Golf Course - East": [
+    4,3,4,5,4,4,4,4,3,
+    3,4,4,4,4,5,4,3,4
+  ],
+
+  "Lincoln Park Golf Course - West": [
+    5,3,4,4,4,4,5,4,3,
+    3,4,3,5,4,3,5,4,4
+  ],
 };
 
 export default function RoundPage({ params }: { params: Promise<{ id: string }> }) {

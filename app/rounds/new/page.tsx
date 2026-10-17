@@ -28,6 +28,15 @@ const COURSES: Record<string, number[]> = {
     4,5,3,4,4,4,3,4,5,
     3,4,4,4,3,5,4,3,5,
   ],
+  "Lincoln Park Golf Course - East": [
+    4,3,4,5,4,4,4,4,3,
+    3,4,4,4,4,5,4,3,4,
+  ],
+  "Lincoln Park Golf Course - West": [
+    5,3,4,4,4,4,5,4,3,
+    3,4,3,5,4,3,5,4,4,
+  ],
+
 };
 
 export default function NewRoundPage() {
