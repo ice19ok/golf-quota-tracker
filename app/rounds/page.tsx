@@ -336,27 +336,7 @@ export default function RoundsPage() {
               </div>
 
               <div className="mt-5 flex flex-wrap gap-2">
-                {rPlayers.map((player, index) => (
-                  <span
-                    key={player.id}
-                    className="rounded bg-gray-100 px-3 py-2"
-                  >
-                    {round.game_mode === "wolf" && (
-                      <span className="mr-1 text-xs font-semibold text-gray-500">
-                        {index + 1}.
-                      </span>
-                    )}
-
-                    {player.name}
-
-                    {player.is_guest && (
-                      <span className="ml-1 text-xs text-gray-500">
-                        (Guest)
-                      </span>
-                    )}
-
-                  </span>
-                ))}
+               {/* Player names removed to keep the rounds list compact. */}
               </div>
 
               {isAdmin && (
