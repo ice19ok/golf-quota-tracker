@@ -25,6 +25,7 @@ type RoundPlayer = {
   round_id: string;
   player_id: string;
   play_order: number | null;
+  quota_at_round: number | null;
 };
 
 export default function RoundsPage() {
@@ -78,7 +79,7 @@ export default function RoundsPage() {
 
       supabase
         .from("round_players")
-        .select("round_id,player_id,play_order"),
+        .select("round_id,player_id,play_order,quota_at_round"),
     ]);
 
     const firstError =
@@ -118,15 +119,16 @@ export default function RoundsPage() {
     );
 
     setRoundPlayers(
-      (rpRes.data || []).map((rp) => ({
-        round_id: String(rp.round_id),
-        player_id: String(rp.player_id),
-        play_order:
-          rp.play_order === null
-            ? null
-            : Number(rp.play_order),
-      }))
-    );
+     (rpRes.data || []).map((rp) => ({
+       round_id: String(rp.round_id),
+       player_id: String(rp.player_id),
+       play_order: rp.play_order === null ? null : Number(rp.play_order),
+       quota_at_round:
+         rp.quota_at_round === null || rp.quota_at_round === undefined
+          ? null
+          : Number(rp.quota_at_round),
+     }))
+  );
 
     setLoading(false);
   }

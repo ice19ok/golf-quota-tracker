@@ -406,12 +406,27 @@ export default function NewRoundPage() {
       const { error: rpError } = await supabase
         .from("round_players")
         .insert(
-          orderedPlayerIds.map((playerId, index) => ({
-            round_id: newRound.id,
-            player_id: playerId,
-            play_order: index + 1,
-          }))
-        );
+          orderedPlayerIds.map((playerId, index) => {
+          const player = players.find(
+           (p) => p.id === playerId
+          );
+
+      const guest = guests.find(
+        (g) => g.tempId === playerId
+      );
+
+      const quota = guest
+        ? Number(guest.quota)
+        : Number(player?.quota ?? 0);
+
+      return {
+        round_id: newRound.id,
+        player_id: playerId,
+        play_order: index + 1,
+        quota_at_round: quota,
+      };
+    })
+  );
 
       if (rpError) {
         throw rpError;
