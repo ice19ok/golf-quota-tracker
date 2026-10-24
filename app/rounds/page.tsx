@@ -69,7 +69,7 @@ export default function RoundsPage() {
         .select(
           "id,name,course,holes,game_mode,is_complete,completed_at"
         )
-        .order("sort_order", { ascending: true }),
+        .order("created_at", { ascending: false }),
 
       supabase
         .from("players")
