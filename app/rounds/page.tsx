@@ -355,17 +355,6 @@ export default function RoundsPage() {
                       </span>
                     )}
 
-                    {round.game_mode === "quota" && (
-                      <span className="ml-2 text-sm text-gray-500">
-                        {round.is_complete
-                          ? `Overall Quota ${player.quota.toFixed(
-                              2
-                            )}`
-                          : `Playing Quota ${Math.round(
-                              player.quota
-                            )}`}
-                      </span>
-                    )}
                   </span>
                 ))}
               </div>
